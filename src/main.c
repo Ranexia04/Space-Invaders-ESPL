@@ -25,13 +25,12 @@
 #define mainGENERIC_STACK_SIZE ((unsigned short)2560)
 #define STACK_SIZE mainGENERIC_STACK_SIZE * 2
 
-#define STATE_QUEUE_LENGTH 1
+#define UNITARY_QUEUE_LENGHT 1
 
 #define STATE_COUNT 1
 
 #define MENU 1
 #define GAME 0
-//#define STATE_THREE 2
 
 #define NEXT_TASK 0
 #define PREV_TASK 1
@@ -41,6 +40,8 @@
 #define STATE_DEBOUNCE_DELAY 300
 
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
+#define BACKGROUND_COLOUR Black
+#define TEXT_COLOUR Green
 #define PI 3.142857
 #define FREQ 1
 #define RADIUS 40
@@ -62,14 +63,14 @@ static TaskHandle_t GameLogic = NULL;
 
 static TaskHandle_t GameDrawer = NULL;
 
+//Timers here if needed
 
 static StaticTask_t GameDrawerBuffer;
 static StackType_t xStack[ STACK_SIZE ];
 
-static QueueHandle_t StateQueue = NULL;
+static QueueHandle_t StateChangeQueue = NULL;
 static QueueHandle_t CurrentStateQueue = NULL;
 
-static QueueHandle_t InitTickQueue = NULL;
 static SemaphoreHandle_t DrawSignal = NULL;
 static SemaphoreHandle_t ScreenLock = NULL;
 
@@ -134,9 +135,9 @@ static int vCheckStateInput(void)
     if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
         if (buttons.buttons[KEYCODE(M)]) {
             buttons.buttons[KEYCODE(M)] = 0;
-            if (StateQueue) {
+            if (StateChangeQueue) {
                 xSemaphoreGive(buttons.lock);
-                xQueueSend(StateQueue, &next_state_signal, 0);
+                xQueueSend(StateChangeQueue, &next_state_signal, 0);
                 return 0;
             }
             xSemaphoreGive(buttons.lock);
@@ -160,7 +161,7 @@ void vDrawHelpText(void)
 
     if (!tumGetTextSize((char *)str, &text_width, NULL))
         checkDraw(tumDrawText(str, SCREEN_WIDTH - text_width - 10,
-                              DEFAULT_FONT_SIZE * 0.5, Black),
+                              DEFAULT_FONT_SIZE * 0.5, TEXT_COLOUR),
                   __FUNCTION__);
 
     tumFontSetSize(prev_font_size);
@@ -183,8 +184,7 @@ void vDrawLogo(void)
 
 void vDrawStaticItems(void)
 {
-    vDrawHelpText();
-    vDrawLogo();
+
 }
 
 void vTaskSuspender()
@@ -210,7 +210,6 @@ void basicSequentialStateMachine(void *pvParameters)
     const int state_change_period = STATE_DEBOUNCE_DELAY;
 
     TickType_t last_change = xTaskGetTickCount();
-    TickType_t tickstate3;
 
     while (1) {
         if (state_changed) {
@@ -218,8 +217,8 @@ void basicSequentialStateMachine(void *pvParameters)
         }
 
         // Handle state machine input
-        if (StateQueue)
-            if (xQueueReceive(StateQueue, &input, portMAX_DELAY) ==
+        if (StateChangeQueue)
+            if (xQueueReceive(StateChangeQueue, &input, portMAX_DELAY) ==
                 pdTRUE)
                 if (xTaskGetTickCount() - last_change >
                     state_change_period) {
@@ -302,10 +301,10 @@ void vDrawFPS(void)
 
     if (!tumGetTextSize((char *)str, &text_width, NULL))
         checkDraw(tumDrawFilledBox(SCREEN_WIDTH - text_width - 10, SCREEN_HEIGHT - DEFAULT_FONT_SIZE * 1.5,
-            text_width, DEFAULT_FONT_SIZE, White), __FUNCTION__);
+            text_width, DEFAULT_FONT_SIZE, BACKGROUND_COLOUR), __FUNCTION__);
         checkDraw(tumDrawText(str, SCREEN_WIDTH - text_width - 10,
                               SCREEN_HEIGHT - DEFAULT_FONT_SIZE * 1.5,
-                              Skyblue),
+                              TEXT_COLOUR),
                   __FUNCTION__);
 
     tumFontSelectFontFromHandle(cur_font);
@@ -333,7 +332,7 @@ void vSwapBuffers(void *pvParameters)
 
 int vCheckButtonInput(int key)
 {
-    unsigned char current_state, Incrementing_state;
+    unsigned char current_state;
 
     if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
         if (buttons.buttons[key]) {
@@ -372,9 +371,6 @@ void vCheckKeyboardInput(void)
 
 void vMenuDrawer(void *pvParameters)
 {
-    ball_t *my_circle = createBall(SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2, Red,
-                                 RADIUS, 1000, NULL, NULL);
-
     static char str[100];
     static int str_width = 0;
 
@@ -391,7 +387,7 @@ void vMenuDrawer(void *pvParameters)
                 xSemaphoreTake(ScreenLock, portMAX_DELAY);
 
                 // Clear screen
-                checkDraw(tumDrawClear(Black), __FUNCTION__);
+                checkDraw(tumDrawClear(BACKGROUND_COLOUR), __FUNCTION__);
                 vDrawStaticItems();
 
                 // Draw FPS in lower right corner
@@ -406,13 +402,6 @@ void vMenuDrawer(void *pvParameters)
 
 void vGameLogic(void *pvParameters)
 {
-    static int* write_circle = NULL;
-    write_circle = (int*)calloc(2, sizeof(int));
-    static unsigned char write_flags[2] = {0};
-
-    TickType_t xLastWakeTime;
-    xLastWakeTime = xTaskGetTickCount();
-
     while (1) {
         
     }
@@ -420,11 +409,9 @@ void vGameLogic(void *pvParameters)
 
 void vGameDrawer(void *pvParameters)
 {
-    ball_t *my_circle = createBall(SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2, Red,
-                                 RADIUS, 1000, NULL, NULL);
+
 
     prints("Game init'd\n");
-
 
     while (1) {
         xSemaphoreTake(DrawSignal, portMAX_DELAY);
@@ -435,7 +422,7 @@ void vGameDrawer(void *pvParameters)
         
 
         xSemaphoreTake(ScreenLock, portMAX_DELAY);
-        checkDraw(tumDrawClear(Black), __FUNCTION__);
+        checkDraw(tumDrawClear(BACKGROUND_COLOUR), __FUNCTION__);
         vDrawStaticItems();
 
         
@@ -515,28 +502,21 @@ int main(int argc, char *argv[])
     }
 
     //Queues
-    StateQueue = xQueueCreate(STATE_QUEUE_LENGTH, sizeof(unsigned char));
-    if (!StateQueue) {
-        PRINT_ERROR("Could not open state queue");
-        goto err_state_queue;
+    StateChangeQueue = xQueueCreate(UNITARY_QUEUE_LENGHT, sizeof(unsigned char));
+    if (!StateChangeQueue) {
+        PRINT_ERROR("Could not open state change queue");
+        goto err_state_change_queue;
     }
 
-    CurrentStateQueue = xQueueCreate(1, sizeof(unsigned char));
+    CurrentStateQueue = xQueueCreate(UNITARY_QUEUE_LENGHT, sizeof(unsigned char));
     if (!CurrentStateQueue) {
         PRINT_ERROR("Could not open current state queue");
         goto err_current_state_queue;
     }
 
-    InitTickQueue = xQueueCreate(1, sizeof(TickType_t));
-    if (!InitTickQueue) {
-        PRINT_ERROR("Could not open init tick queue");
-        goto err_Init_Tick_queue;
-    }
-
     //Timers
     
 
-    
 
     //Infrastructure Tasks
     if (xTaskCreate(basicSequentialStateMachine, "StateMachine",
@@ -556,7 +536,7 @@ int main(int argc, char *argv[])
                     mainGENERIC_STACK_SIZE * 2, NULL, mainGENERIC_PRIORITY,
                     &GameLogic) != pdPASS) {
         PRINT_TASK_ERROR("GameLogic");
-        goto err_circle_manager;
+        goto err_game_logic;
     }
 
     //Normal Tasks
@@ -585,33 +565,30 @@ int main(int argc, char *argv[])
         vTaskDelete(MenuDrawer);
     err_MenuDrawer:
         vTaskDelete(GameLogic);
-    err_circle_manager:
+    err_game_logic:
         vTaskDelete(BufferSwap);
     err_bufferswap:
         vTaskDelete(StateMachine);
     err_statemachine:
-        vQueueDelete(InitTickQueue);
-    err_Init_Tick_queue:
-        vQueueDelete(GameLogic);
-    err_circle_queue:
         vQueueDelete(CurrentStateQueue);
     err_current_state_queue:
-        vQueueDelete(StateQueue);
-    err_state_queue:
+        vQueueDelete(StateChangeQueue);
+    err_state_change_queue:
         vSemaphoreDelete(ScreenLock);
     err_screen_lock:
         vSemaphoreDelete(DrawSignal);
     err_draw_signal:
         vSemaphoreDelete(buttons.lock);
     err_buttons_lock:
+        safePrintExit();
+    err_init_safe_print:
         tumSoundExit();
     err_init_audio:
         tumEventExit();
     err_init_events:
         tumDrawExit();
     err_init_drawing:
-        safePrintExit();
-    err_init_safe_print:
+        
     return EXIT_FAILURE;
 }
 
