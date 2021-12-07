@@ -1,0 +1,258 @@
+# This will run on Travis' 'new' container-based infrastructure
+sudo: false
+
+language: c
+
+os: linux
+
+compiler: gcc
+
+# Blacklist
+branches:
+    only:
+        - master
+        - pong
+        - ci
+
+addons:
+    apt:
+        packages:
+            - cmake
+            - libsdl2-ttf-dev
+            - libsdl2-mixer-dev
+            - libsdl2-image-dev
+            - libsdl2-gfx-dev
+            - libsdl2-dev
+
+matrix:
+  include:
+
+    #
+  # Doxygen
+  #
+  - os: linux
+    env:
+      - TEST="Doxygen"
+    addons:
+      apt:
+        packages:
+          - doxygen
+    script:
+      - cd docs && doxygen Doxyfile
+      - cd ..
+      - |
+        if [[ -s "docs/doxygen_warnings.txt" ]]; then
+          echo "You must fix doxygen before submitting a pull request"
+          echo "Build doxygen: `cmake -DDOCS=ON .. & make` docs"
+          echo ""
+          cat doxygen_warnings.txt
+          exit -1
+        fi
+    # Generate and deploy documentation
+    deploy:
+        provider: pages
+        skip_cleanup: true
+        local_dir: docs/docs/html
+        github_token: $GH_REPO_TOKEN
+        keep_history: true
+        on:
+            branch: master
+
+  #
+  # Git Check
+  #
+  - os: linux
+    env:
+      - TEST="Git Check"
+    script:
+      - |
+        if [[ -n $(git diff --check HEAD^) ]]; then
+          echo "You must remove whitespace before submitting a pull request"
+          echo ""
+          git diff --check HEAD^
+          exit -1
+        fi
+
+  #
+  # Astyle Format
+  #
+  - os: linux
+    env:
+      - TEST="Astyle Format"
+
+    script:
+      - cd build
+      - cmake -DENABLE_ASTYLE=ON ..
+      - make
+      - make format
+      - |
+        if [[ -n $(git diff) ]]; then
+          echo "You must run make format before submitting a pull request"
+          echo ""
+          git diff
+          exit -1
+        fi
+      - cd ..
+    
+  #
+  # Clang Tidy
+  #
+  - os: linux
+    env:
+      - TEST="Clang Tidy"
+    addons:
+      apt:
+        sources:
+          - llvm-toolchain-trusty-4.0
+        packages:
+          - libsdl2-ttf-dev
+          - libsdl2-mixer-dev
+          - libsdl2-image-dev
+          - libsdl2-gfx-dev
+          - libsdl2-dev
+          - clang-4.0
+          - clang-tidy-4.0
+
+    script:
+      - cd build
+      - cmake -DENABLE_CLANG_TIDY=ON ..
+      - make
+      - make tidy > output.txt
+      - cd ..
+      - |
+        if [[ -n $(grep "error: " build/output.txt) ]]; then
+            echo "You must pass the clang tidy checks before submitting a pull request"
+            echo "cmake -DENABLE_CLANG_TIDY=ON .. & make tidy"
+            echo ""
+            grep --color -E '^|error: ' build/output.txt
+            exit -1
+        elif [[ -n $(grep "warning: " build/output.txt) ]]; then
+            echo "Warnings:"
+            grep --color -E '^|warning: ' build/output.txt
+            echo -e "\033[1;32m\xE2\x9C\x93 passed - with warnings\033[0m $1"
+            exit 0
+        else
+            echo -e "\033[1;32m\xE2\x9C\x93 passed - no warnings\033[0m $1"
+            exit 0
+        fi
+
+#TODO https://scan.coverity.com/travis_ci
+#   #
+#   # Coverity Scan
+#   #
+#   - os: linux
+#     env:
+#       - TEST="Coverity Scan"
+#       coverity_scan:
+#         project:
+#           name: "alxhoff/FreeRTOS_Emulator"
+#           description: "x86 POSIX FreeRTOS Emulator"
+#         notification_email: alxhoff@gmail.com
+#         build_command_prepend: "cmake .."
+#         build_command: "make"
+#         branch_pattern: master
+#     script:
+        # - cd build
+#       - echo -n | openssl s_client -connect scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-
+        # - cd ..
+
+
+  #
+  # CppCheck
+  #
+  - os: linux
+    env:
+      - TEST="CppCheck"
+    addons:
+        apt:
+            packages:
+                - cmake
+                - libsdl2-ttf-dev
+                - libsdl2-mixer-dev
+                - libsdl2-image-dev
+                - libsdl2-gfx-dev
+                - libsdl2-dev
+    script:
+      - cd build
+      - cmake -DENABLE_CPPCHECK=ON ..
+      - make
+      - make check 
+      - cd ..
+
+ #
+  # Google Address Sanitizer
+  #
+  - os: linux
+
+    env:
+      - TEST="Google Address Sanitizer"
+
+    script:
+      - cd build
+      - cmake -DENABLE_ASAN=ON ..
+      - make
+      - ./../bin/FreeRTOS_Emulator_asan &
+      - sleep 20
+      - kill %1
+      - cd ..
+
+  #
+  # Google Undefined Sanitizer
+  #
+  - os: linux
+
+    env:
+      - TEST="Google Undefined Sanitizer"
+
+    script:
+      - cd build
+      - cmake -DENABLE_USAN=ON ..
+      - make
+      - ./../bin/FreeRTOS_Emulator_usan &
+      - sleep 20
+      - kill %1
+      - cd ..
+
+  #
+  # Google Thread Sanitizer
+  #
+  - os: linux
+    env:
+      - TEST="Google Thread Sanitizer"
+
+    script:
+      - cd build
+      - cmake -DENABLE_TSAN=ON ..
+      - make
+      - ./../bin/FreeRTOS_Emulator_tsan &
+      - sleep 20
+      - kill %1
+      - cd ..
+      #TODO check for errors
+
+  #
+  # Codecov
+  #
+  - os: linux
+    env:
+      - TEST="Codecov"
+
+    script:
+      - cd build
+      - cmake -DENABLE_COVERAGE=ON ..
+      - make
+      - make test &
+      - sleep 20
+      - cd ..
+      - bash <(curl -s https://codecov.io/bash)
+
+  #
+  # Standard Build
+  #
+  - os: linux
+    env:
+      - TEST="Standard Build"
+    script:
+      - cd build
+      - cmake ..
+      - make
