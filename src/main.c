@@ -181,6 +181,10 @@ void vDrawGameWords(void)
     sprintf(str, "S C O R E < 2 >");
 	text_width = tumGetTextSize(str, &text_width, NULL);
 	checkDraw(tumDrawText(str, SCREEN_WIDTH * 2 / 3 + 10, 10, TEXT_COLOUR), __FUNCTION__);
+
+    sprintf(str, "C R E D I T");
+	text_width = tumGetTextSize(str, &text_width, NULL);
+	checkDraw(tumDrawText(str, SCREEN_WIDTH * 2 / 3 - 15, SCREEN_HEIGHT - DEFAULT_FONT_SIZE - 20, TEXT_COLOUR), __FUNCTION__);
 }
 
 void vGetNumberString(char *str, int number, int n_digits)
@@ -217,7 +221,7 @@ void vGetNumberString(char *str, int number, int n_digits)
 void vDrawGameNumbers(void)
 {
     char str[30];
-    int text_width, score1 = 0, highscore = 0, credit = 0;
+    int text_width, score1 = 0, highscore = 0, credit = 0, n_lives = 3;
 
     if ( score1 > 9999 ) {
         sprintf(str, "9 9 9 9");
@@ -241,7 +245,11 @@ void vDrawGameNumbers(void)
         vGetNumberString(str, credit, 2);
     }
 	text_width = tumGetTextSize(str, &text_width, NULL);
-	checkDraw(tumDrawText(str, SCREEN_WIDTH - 50, SCREEN_HEIGHT - DEFAULT_FONT_SIZE - 30, TEXT_COLOUR), __FUNCTION__);
+	checkDraw(tumDrawText(str, SCREEN_WIDTH - 50, SCREEN_HEIGHT - DEFAULT_FONT_SIZE - 20, TEXT_COLOUR), __FUNCTION__);
+
+    vGetNumberString(str, n_lives, 1);
+    text_width = tumGetTextSize(str, &text_width, NULL);
+	checkDraw(tumDrawText(str, 20, SCREEN_HEIGHT - DEFAULT_FONT_SIZE - 20, TEXT_COLOUR), __FUNCTION__);
 }
 
 void vDrawGameText(void)
@@ -453,9 +461,6 @@ void vMenuDrawer(void *pvParameters)
 					  __FUNCTION__);
 				checkDraw(tumDrawText("Menu", 20, 20, TEXT_COLOUR), __FUNCTION__);
 
-				// Draw FPS in lower right corner
-				vDrawFPS();
-
 				xSemaphoreGive(ScreenLock);
 
 				vCheckKeyboardInput();
@@ -483,7 +488,6 @@ void vGameDrawer(void *pvParameters)
 		checkDraw(tumDrawClear(BACKGROUND_COLOUR), __FUNCTION__);
 		vDrawGameText();
 
-		vDrawFPS();
 		xSemaphoreGive(ScreenLock);
 
 		vCheckKeyboardInput();
@@ -573,26 +577,26 @@ int main(int argc, char *argv[])
 
 	//Infrastructure Tasks
 	if (xTaskCreate(basicSequentialStateMachine, "StateMachine",
-			mainGENERIC_STACK_SIZE * 2, NULL,
+			STACK_SIZE, NULL,
 			configMAX_PRIORITIES - 1, &StateMachine) != pdPASS) {
 		PRINT_TASK_ERROR("StateMachine");
 		goto err_statemachine;
 	}
 	if (xTaskCreate(vSwapBuffers, "BufferSwapTask",
-			mainGENERIC_STACK_SIZE * 2, NULL, configMAX_PRIORITIES,
+			STACK_SIZE, NULL, configMAX_PRIORITIES,
 			&BufferSwap) != pdPASS) {
 		PRINT_TASK_ERROR("BufferSwapTask");
 		goto err_bufferswap;
 	}
 
-	if (xTaskCreate(vGameLogic, "GameLogic", mainGENERIC_STACK_SIZE * 2,
+	if (xTaskCreate(vGameLogic, "GameLogic", STACK_SIZE,
 			NULL, mainGENERIC_PRIORITY, &GameLogic) != pdPASS) {
 		PRINT_TASK_ERROR("GameLogic");
 		goto err_game_logic;
 	}
 
 	//Normal Tasks
-	if (xTaskCreate(vMenuDrawer, "MenuDrawer", mainGENERIC_STACK_SIZE * 2,
+	if (xTaskCreate(vMenuDrawer, "MenuDrawer", STACK_SIZE,
 			NULL, mainGENERIC_PRIORITY + 3,
 			&MenuDrawer) != pdPASS) {
 		PRINT_TASK_ERROR("MenuDrawer");
