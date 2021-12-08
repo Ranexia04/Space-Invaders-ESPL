@@ -1,4 +1,3 @@
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -10,6 +9,7 @@
 #include "task.h"
 #include "timers.h"
 #include "string.h"
+#include <math.h>
 
 #include "TUM_Ball.h"
 #include "TUM_Draw.h"
@@ -39,6 +39,9 @@
 #define STARTING_STATE GAME
 
 #define STATE_DEBOUNCE_DELAY 300
+
+#define NOT_CENTERING 0
+#define CENTERING 1
 
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
 #define BACKGROUND_COLOUR Black
@@ -165,31 +168,28 @@ void vDrawLogo(void)
 	}
 }
 
-void vDrawGameWords(void)
+#define UPPER_TEXT_YLOCATION 10
+#define LOWER_TEXT_YLOCATION SCREEN_HEIGHT - DEFAULT_FONT_SIZE - 20
+
+void vAddSpaces(char *str)
 {
-    char str[30];
-	int text_width;
+    int index = 0;
+    char buffer[30], buffer2[30];
 
-    sprintf(str, "S C O R E < 1 >");
-	text_width = tumGetTextSize(str, &text_width, NULL);
-	checkDraw(tumDrawText(str, 10, 10, TEXT_COLOUR), __FUNCTION__);
+    strcpy(buffer, str);
+    strcpy(str, "");
 
-    sprintf(str, "H I - S C O R E");
-	text_width = tumGetTextSize(str, &text_width, NULL);
-	checkDraw(tumDrawText(str, SCREEN_WIDTH / 3 + 10, 10, TEXT_COLOUR), __FUNCTION__);
-
-    sprintf(str, "S C O R E < 2 >");
-	text_width = tumGetTextSize(str, &text_width, NULL);
-	checkDraw(tumDrawText(str, SCREEN_WIDTH * 2 / 3 + 10, 10, TEXT_COLOUR), __FUNCTION__);
-
-    sprintf(str, "C R E D I T");
-	text_width = tumGetTextSize(str, &text_width, NULL);
-	checkDraw(tumDrawText(str, SCREEN_WIDTH * 2 / 3 - 15, SCREEN_HEIGHT - DEFAULT_FONT_SIZE - 20, TEXT_COLOUR), __FUNCTION__);
+    while ( buffer[index] != '\0') {
+        sprintf(buffer2, "%c ", buffer[index]);
+        strcat(str, buffer2);
+        index++;
+    }
+        
 }
 
 void vGetNumberString(char *str, int number, int n_digits)
 {
-    char num_str[10];
+    char num_str[30];
 	int index = 0, i;
     
     sprintf(num_str, "%d", number);
@@ -198,64 +198,87 @@ void vGetNumberString(char *str, int number, int n_digits)
     }
     index--;//index is now the index of the last digit of the number we want to draw
     
-    i = 2 * n_digits - 1;
+    i = n_digits;
     str[i] = '\0';
-    i = i - 2;
-    while (i >= 0) {
-        str[i] = ' ';
-        i = i - 2;
-    }
+    i--;
 
-    i = 2 * n_digits - 2;
     while ( index >= 0 ) {
         str[i] = num_str[index];
         index--;
-        i = i - 2;
+        i--;
     }
     while ( i >= 0 ) {
         str[i] = '0';
-        i = i - 2;
+        i--;
     }
 }
 
-void vDrawGameNumbers(void)
+void vDrawText(char *buffer, int x, int y, int centering)
+{
+    char str[30] = {'\0'};
+	int text_width;
+
+    strcpy(str, buffer);
+    vAddSpaces(str);
+	tumGetTextSize(str, &text_width, NULL);
+    if ( centering == CENTERING ) {
+        x = x - text_width / 2;
+        y = y - DEFAULT_FONT_SIZE / 2;
+    }
+	checkDraw(tumDrawText(str, x, y, TEXT_COLOUR), __FUNCTION__);
+}
+
+void vGetMaxNumber(int *max_number, int n_digits)
+{
+    for ( int i = 0; i < n_digits; i++) {
+        (*max_number) = (*max_number) + 9 * pow(10, i);
+    }
+}
+
+void vDrawNumber(int number, int x, int y, int n_digits)
 {
     char str[30];
-    int text_width, score1 = 0, highscore = 0, credit = 0, n_lives = 3;
+    int max_number = 0;
 
-    if ( score1 > 9999 ) {
-        sprintf(str, "9 9 9 9");
+    vGetMaxNumber(&max_number, n_digits);
+
+    if ( number > max_number ) {
+        sprintf(str, "%d", max_number);
     } else {
-        vGetNumberString(str, score1, 4);
+        vGetNumberString(str, number, n_digits);
     }
-	text_width = tumGetTextSize(str, &text_width, NULL);
-	checkDraw(tumDrawText(str, 45, 15 + DEFAULT_FONT_SIZE, TEXT_COLOUR), __FUNCTION__);
+    
+    vAddSpaces(str);
+	vDrawText(str, x, y, NOT_CENTERING);
+}
 
-    if ( highscore > 9999 ) {
-        sprintf(str, "9 9 9 9");
-    } else {
-        vGetNumberString(str, highscore, 4);
-    }
-	text_width = tumGetTextSize(str, &text_width, NULL);
-	checkDraw(tumDrawText(str, SCREEN_WIDTH / 3 + 25, 15 + DEFAULT_FONT_SIZE, TEXT_COLOUR), __FUNCTION__);
+void vDrawScores(void)
+{
+    int score1 = 0, hiscore = 0;
 
-    if ( credit > 99 ) {
-        sprintf(str, "9 9");
-    } else {
-        vGetNumberString(str, credit, 2);
-    }
-	text_width = tumGetTextSize(str, &text_width, NULL);
-	checkDraw(tumDrawText(str, SCREEN_WIDTH - 50, SCREEN_HEIGHT - DEFAULT_FONT_SIZE - 20, TEXT_COLOUR), __FUNCTION__);
+    vDrawText("SCORE<1>", 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
+    vDrawNumber(score1, 45, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
+    vDrawText("HI-SCORE", SCREEN_WIDTH / 3 + 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
+    vDrawNumber(hiscore, SCREEN_WIDTH / 3 + 25, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
+    vDrawText("SCORE<2>", SCREEN_WIDTH * 2 / 3 + 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
+}
 
-    vGetNumberString(str, n_lives, 1);
-    text_width = tumGetTextSize(str, &text_width, NULL);
-	checkDraw(tumDrawText(str, 20, SCREEN_HEIGHT - DEFAULT_FONT_SIZE - 20, TEXT_COLOUR), __FUNCTION__);
+void vDrawCredit(void)
+{
+    int credit = 0;
+
+    vDrawText("CREDIT", SCREEN_WIDTH * 2 / 3 - 20, LOWER_TEXT_YLOCATION, NOT_CENTERING);
+    vDrawNumber(credit, SCREEN_WIDTH - 55, LOWER_TEXT_YLOCATION, 2);
 }
 
 void vDrawGameText(void)
 {
-	vDrawGameWords();
-    vDrawGameNumbers();
+    int n_lives = 3;
+
+    vDrawScores();
+    vDrawCredit();
+    vDrawNumber(n_lives, 20, LOWER_TEXT_YLOCATION, 1);
+
 }
 
 void vTaskSuspender()
@@ -442,6 +465,19 @@ void vCheckKeyboardInput(void)
 	vCheckButtonInput(KEYCODE(3));
 }
 
+void vDrawMenuText(void)
+{
+    vDrawScores();
+    vDrawText("PLAY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4, CENTERING);
+    vDrawText("SPACE INVADERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, CENTERING);
+    vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
+    vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
+    vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3, CENTERING);
+    vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5, CENTERING);
+    vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6, CENTERING);
+    vDrawCredit();
+}
+
 void vMenuDrawer(void *pvParameters)
 {
 	prints("Menu Init'd\n");
@@ -459,7 +495,7 @@ void vMenuDrawer(void *pvParameters)
 				// Clear screen
 				checkDraw(tumDrawClear(BACKGROUND_COLOUR),
 					  __FUNCTION__);
-				checkDraw(tumDrawText("Menu", 20, 20, TEXT_COLOUR), __FUNCTION__);
+				vDrawMenuText();
 
 				xSemaphoreGive(ScreenLock);
 
