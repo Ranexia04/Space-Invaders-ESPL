@@ -53,8 +53,9 @@
 #define RADIUS 40
 #define SPACESHIP_FILENAME "spaceship.png"
 #define GREEN_LINE_Y SCREEN_HEIGHT - 38
-#define TOP_LINE_Y 65
+#define TOP_LINE_Y 75
 #define SPACESHIP_Y SCREEN_HEIGHT - 75
+#define BULLET_HEIGHT 5
 
 #ifdef TRACE_FUNCTIONS
 #include "tracer.h"
@@ -77,9 +78,13 @@ static StackType_t xStack[STACK_SIZE];
 
 static QueueHandle_t StateChangeQueue = NULL;
 static QueueHandle_t CurrentStateQueue = NULL;
+static QueueHandle_t BulletQueue = NULL;
+static QueueHandle_t ColisionQueue = NULL;
 
 static SemaphoreHandle_t DrawSignal = NULL;
 static SemaphoreHandle_t ScreenLock = NULL;
+
+static image_handle_t colision_image = NULL;
 
 typedef struct buttons_buffer {
 	unsigned char buttons[SDL_NUM_SCANCODES];
@@ -106,6 +111,36 @@ typedef struct spaceship {
 } spaceship_t;
 
 static spaceship_t my_spaceship = { 0 };
+
+typedef struct bullet {
+    int x; /**< X pixel coord of spaceship on screen */
+    int y; /**< Y pixel coord of spaceship on screen */
+
+    signed short width;
+    signed short height;
+
+    unsigned int colour;
+
+    callback_t callback; /**< Collision callback */
+    void *args; /**< Collision callback args */
+    SemaphoreHandle_t lock;
+} bullet_t;
+
+typedef struct colision {
+    image_handle_t image;
+
+    int x; /**< X pixel coord of colision on screen */
+    int y; /**< Y pixel coord of colision on screen */
+
+    signed short width;
+    signed short height;
+
+    int frame_number;
+
+    callback_t callback; /**< Collision callback */
+    void *args; /**< Collision callback args */
+    SemaphoreHandle_t lock;
+} colision_t;
 
 void checkDraw(unsigned char status, const char *msg)
 {
@@ -527,10 +562,115 @@ void vMenuDrawer(void *pvParameters)
 	}
 }
 
+void vUpdateBulletPosition(void)
+{
+    int i = 0, n_bullets;
+    bullet_t *my_bullet[1000];
+
+    while (uxQueueMessagesWaiting(BulletQueue)) {
+        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
+        xSemaphoreTake(my_bullet[i]->lock, portMAX_DELAY);
+        my_bullet[i]->y = my_bullet[i]->y - 5;
+        xSemaphoreGive(my_bullet[i]->lock);
+        i++;
+    }
+
+    n_bullets = i;
+    for (i = 0; i < n_bullets; i++) {
+        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
+    }
+}
+
+bullet_t *createBullet(int initial_x, int initial_y)
+{
+    bullet_t *ret = calloc(1, sizeof(bullet_t));
+
+    if (!ret) {
+        fprintf(stderr, "Creating bullet failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    ret->x = initial_x;
+    ret->y = initial_y;
+    ret->width = 1;
+    ret->height = BULLET_HEIGHT;
+    ret->colour = White;
+    ret->lock = xSemaphoreCreateMutex();
+
+    return ret;
+}
+
+void vShootBullet(void)
+{
+    prints("SHOT\n");
+
+    bullet_t *my_bullet = createBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y - BULLET_HEIGHT);
+    xQueueSend(BulletQueue, &my_bullet, portMAX_DELAY);
+}
+
+#define TOP_COLISION 0
+
+colision_t *createColision(int bullet_x, int bullet_y, int colision_type)
+{
+    colision_t *ret = calloc(1, sizeof(colision_t));
+
+    if (!ret) {
+        fprintf(stderr, "Creating colision failed\n");
+        exit(EXIT_FAILURE);
+    }
+    if (colision_type == TOP_COLISION) {
+        ret->image = tumDrawLoadImage("colision.png");
+    }
+    ret->width = tumDrawGetLoadedImageWidth(ret->image);
+    ret->height = tumDrawGetLoadedImageHeight(ret->image);
+    ret->x = bullet_x - ret->width / 2;
+    ret->y = bullet_y - ret->height / 2;
+    ret->frame_number = 0;
+    ret->lock = xSemaphoreCreateMutex();
+
+    return ret;
+}
+
+void vCheckBulletColision(void)
+{
+    int i = 0, n_bullets;
+    bullet_t *my_bullet[10];
+    colision_t *my_colision;
+
+    while (uxQueueMessagesWaiting(BulletQueue)) {
+        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
+        if (my_bullet[i]->y <= TOP_LINE_Y) {//bullet exceeded top limit
+            my_colision = createColision(my_bullet[i]->x, my_bullet[i]->y, TOP_COLISION);
+            xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
+            vSemaphoreDelete(my_bullet[i]->lock);
+            free(my_bullet[i]);
+            i--;
+        }
+        i++;
+    }
+
+    n_bullets = i;
+    for (i = 0; i < n_bullets; i++) {
+        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
+    }
+    
+}
+
 void vGameLogic(void *pvParameters)
 {
+    TickType_t last_shot = xTaskGetTickCount();
+
 	while (1) {
-        vTaskDelay(portMAX_DELAY);
+        xGetButtonInput(); // Update global input
+        vCheckKeyboardInput();
+        vUpdateBulletPosition();
+        vCheckBulletColision();
+        if (tumEventGetMouseLeft() == 1 && xTaskGetTickCount() - last_shot >
+            SHOOT_DEBOUNCE_DELAY) {
+            vShootBullet();
+            last_shot = xTaskGetTickCount();
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
 	}
 }
 
@@ -540,33 +680,66 @@ void vDrawGameObjects(void)
                                 my_spaceship.y),
              __FUNCTION__);
     checkDraw(tumDrawFilledBox(0, GREEN_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
-    checkDraw(tumDrawFilledBox(0, TOP_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
+    //checkDraw(tumDrawFilledBox(0, TOP_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
+}
+
+void vDrawBullets(void)
+{
+    int i = 0, n_bullets;
+    bullet_t *my_bullet[1000];
+
+    while(uxQueueMessagesWaiting(BulletQueue)) {
+        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
+        checkDraw(tumDrawFilledBox(my_bullet[i]->x, my_bullet[i]->y, my_bullet[i]->width, my_bullet[i]->height, my_bullet[i]->colour), __FUNCTION__);
+        i++;
+    }
+
+    n_bullets = i;
+    for (i = 0; i < n_bullets; i++) {
+        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
+    }
+}
+
+void vDrawColisions(void)
+{
+    int i = 0, n_colisions;
+    colision_t *my_colision[10];
+
+    while(uxQueueMessagesWaiting(ColisionQueue)) {
+        xQueueReceive(ColisionQueue, &my_colision[i], portMAX_DELAY);
+        tumDrawLoadedImage(my_colision[i]->image, my_colision[i]->x, my_colision[i]->y);
+        xSemaphoreTake(my_colision[i]->lock, portMAX_DELAY);
+        my_colision[i]->frame_number++;
+        xSemaphoreGive(my_colision[i]->lock);
+        if (my_colision[i]->frame_number > 20) {
+            vSemaphoreDelete(my_colision[i]->lock);
+            free(my_colision[i]);
+            i--;
+        }
+        i++;
+    }
+
+    n_colisions = i;
+    for (i = 0; i < n_colisions; i++) {
+        xQueueSend(ColisionQueue, &my_colision[i], portMAX_DELAY);
+    }
 }
 
 void vGameDrawer(void *pvParameters)
 {
-    TickType_t last_shot = xTaskGetTickCount();
-
 	prints("Game init'd\n");
 
 	while (1) {
 		xSemaphoreTake(DrawSignal, portMAX_DELAY);
-		tumEventFetchEvents(FETCH_EVENT_BLOCK |
+        tumEventFetchEvents(FETCH_EVENT_BLOCK |
 				    FETCH_EVENT_NO_GL_CHECK);
-		xGetButtonInput(); // Update global input
-
 		xSemaphoreTake(ScreenLock, portMAX_DELAY);
 		checkDraw(tumDrawClear(BACKGROUND_COLOUR), __FUNCTION__);
 		vDrawGameText();
         vDrawGameObjects();
+        vDrawBullets();
+        vDrawColisions();
 		xSemaphoreGive(ScreenLock);
-
-		vCheckKeyboardInput();
-        if (tumEventGetMouseLeft() == 1 && xTaskGetTickCount() - last_shot >
-            SHOOT_DEBOUNCE_DELAY) {
-            prints("SHOT\n");
-            last_shot = xTaskGetTickCount();
-        }
 	}
 }
 
@@ -662,6 +835,20 @@ int main(int argc, char *argv[])
 		goto err_current_state_queue;
 	}
 
+    BulletQueue =
+		xQueueCreate(10, sizeof(bullet_t*));
+	if (!BulletQueue) {
+		PRINT_ERROR("Could not open bullet queue");
+		goto err_bullet_queue;
+	}
+
+    ColisionQueue =
+		xQueueCreate(10, sizeof(colision_t*));
+	if (!ColisionQueue) {
+		PRINT_ERROR("Could not open colision queue");
+		goto err_colision_queue;
+	}
+
 	//Timers
 
 	//Infrastructure Tasks
@@ -679,28 +866,31 @@ int main(int argc, char *argv[])
 	}
 
 	if (xTaskCreate(vGameLogic, "GameLogic", STACK_SIZE,
-			NULL, mainGENERIC_PRIORITY, &GameLogic) != pdPASS) {
+			NULL, mainGENERIC_PRIORITY + 2, &GameLogic) != pdPASS) {
 		PRINT_TASK_ERROR("GameLogic");
 		goto err_game_logic;
 	}
 
 	//Normal Tasks
 	if (xTaskCreate(vMenuDrawer, "MenuDrawer", STACK_SIZE,
-			NULL, mainGENERIC_PRIORITY + 3,
+			NULL, mainGENERIC_PRIORITY + 1,
 			&MenuDrawer) != pdPASS) {
 		PRINT_TASK_ERROR("MenuDrawer");
 		goto err_MenuDrawer;
 	}
 
 	GameDrawer = xTaskCreateStatic(vGameDrawer, "Task2", STACK_SIZE, NULL,
-				       mainGENERIC_PRIORITY + 2, xStack,
+				       mainGENERIC_PRIORITY + 1, xStack,
 				       &GameDrawerBuffer);
 	if (GameDrawer == NULL) {
 		PRINT_TASK_ERROR("GameDrawer");
 		goto err_GameDrawer;
 	}
 
+    colision_image = tumDrawLoadImage("colision.png");
+
     vInitSpaceship();
+
 	vTaskSuspender();
 
 	vTaskStartScheduler();
@@ -717,6 +907,10 @@ err_game_logic:
 err_bufferswap:
 	vTaskDelete(StateMachine);
 err_statemachine:
+    vQueueDelete(ColisionQueue);
+err_colision_queue:
+    vQueueDelete(BulletQueue);
+err_bullet_queue:
 	vQueueDelete(CurrentStateQueue);
 err_current_state_queue:
 	vQueueDelete(StateChangeQueue);
