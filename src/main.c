@@ -39,6 +39,7 @@
 #define STARTING_STATE GAME
 
 #define STATE_DEBOUNCE_DELAY 300
+#define SHOOT_DEBOUNCE_DELAY 300
 
 #define NOT_CENTERING 0
 #define CENTERING 1
@@ -50,9 +51,10 @@
 #define PI 3.142857
 #define FREQ 1
 #define RADIUS 40
-#define LOGO_FILENAME "freertos.jpg"
-#define FPS_AVERAGE_COUNT 50
-#define FPS_FONT "IBMPlexSans-Bold.ttf"
+#define SPACESHIP_FILENAME "spaceship.png"
+#define GREEN_LINE_Y SCREEN_HEIGHT - 38
+#define TOP_LINE_Y 65
+#define SPACESHIP_Y SCREEN_HEIGHT - 75
 
 #ifdef TRACE_FUNCTIONS
 #include "tracer.h"
@@ -79,14 +81,31 @@ static QueueHandle_t CurrentStateQueue = NULL;
 static SemaphoreHandle_t DrawSignal = NULL;
 static SemaphoreHandle_t ScreenLock = NULL;
 
-static image_handle_t logo_image = NULL;
-
 typedef struct buttons_buffer {
 	unsigned char buttons[SDL_NUM_SCANCODES];
 	SemaphoreHandle_t lock;
 } buttons_buffer_t;
 
 static buttons_buffer_t buttons = { 0 };
+
+typedef struct spaceship {
+    image_handle_t image;
+
+    int x; /**< X pixel coord of ball on screen */
+    int y; /**< Y pixel coord of ball on screen */
+
+    signed short width;
+    signed short height;
+
+    float f_x; /**< Absolute X location of ball */
+    float f_y; /**< Absolute Y location of ball */
+
+    callback_t callback; /**< Collision callback */
+    void *args; /**< Collision callback args */
+    SemaphoreHandle_t lock;
+} spaceship_t;
+
+static spaceship_t my_spaceship = { 0 };
 
 void checkDraw(unsigned char status, const char *msg)
 {
@@ -151,21 +170,6 @@ static int vCheckStateInput(void)
 	}
 
 	return 0;
-}
-
-void vDrawLogo(void)
-{
-	static int image_height;
-
-	if ((image_height = tumDrawGetLoadedImageHeight(logo_image)) != -1)
-		checkDraw(tumDrawLoadedImage(logo_image, 10,
-					     SCREEN_HEIGHT - 10 - image_height),
-			  __FUNCTION__);
-	else {
-		fprints(stderr,
-			"Failed to get size of image '%s', does it exist?\n",
-			LOGO_FILENAME);
-	}
 }
 
 #define UPPER_TEXT_YLOCATION 10
@@ -305,6 +309,9 @@ void basicSequentialStateMachine(void *pvParameters)
 
 	TickType_t last_change = xTaskGetTickCount();
 
+    xQueueOverwrite(CurrentStateQueue,
+							&current_state);
+
 	while (1) {
 		if (state_changed) {
 			goto initial_state;
@@ -348,6 +355,9 @@ void basicSequentialStateMachine(void *pvParameters)
 		}
 	}
 }
+
+#define FPS_AVERAGE_COUNT 50
+#define FPS_FONT "IBMPlexSans-Bold.ttf"
 
 void vDrawFPS(void)
 {
@@ -425,29 +435,48 @@ void vSwapBuffers(void *pvParameters)
 	}
 }
 
+#define CHANGE_IN_POSITION 3
+
+void vMoveSpaceshipLeft(void)
+{
+    if (xSemaphoreTake(my_spaceship.lock, 0) == pdTRUE) {
+        my_spaceship.x = my_spaceship.x - CHANGE_IN_POSITION;
+        if (my_spaceship.x < 0) {
+            my_spaceship.x = 0;
+        }
+        xSemaphoreGive(my_spaceship.lock);
+    }
+}
+
+void vMoveSpaceshipRight(void)
+{
+    if (xSemaphoreTake(my_spaceship.lock, 0) == pdTRUE) {
+        my_spaceship.x = my_spaceship.x + CHANGE_IN_POSITION;
+        if (my_spaceship.x + my_spaceship.width > SCREEN_WIDTH) {
+            my_spaceship.x = SCREEN_WIDTH - my_spaceship.width;
+        }
+        xSemaphoreGive(my_spaceship.lock);
+    }
+}
+
 int vCheckButtonInput(int key)
 {
 	unsigned char current_state;
 
 	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
 		if (buttons.buttons[key]) {
-			buttons.buttons[key] = 0;
 			xSemaphoreGive(buttons.lock);
-
 			if (xQueuePeek(CurrentStateQueue, &current_state, 0) ==
 			    pdTRUE) {
 				switch (key) {
-				case KEYCODE(1):
-
-					break;
-				case KEYCODE(2):
-
-					break;
-				case KEYCODE(3):
-
-					break;
-				default:
-					break;
+				    case KEYCODE(A):
+                        vMoveSpaceshipLeft();
+					    break;
+				    case KEYCODE(D):
+                        vMoveSpaceshipRight();
+					    break;
+				    default:
+					    break;
 				}
 			}
 			return 0;
@@ -460,9 +489,8 @@ int vCheckButtonInput(int key)
 void vCheckKeyboardInput(void)
 {
 	vCheckStateInput();
-	vCheckButtonInput(KEYCODE(1));
-	vCheckButtonInput(KEYCODE(2));
-	vCheckButtonInput(KEYCODE(3));
+	vCheckButtonInput(KEYCODE(A));
+	vCheckButtonInput(KEYCODE(D));
 }
 
 void vDrawMenuText(void)
@@ -483,35 +511,42 @@ void vMenuDrawer(void *pvParameters)
 	prints("Menu Init'd\n");
 
 	while (1) {
-		if (DrawSignal)
-			if (xSemaphoreTake(DrawSignal, portMAX_DELAY) ==
-			    pdTRUE) {
-				tumEventFetchEvents(FETCH_EVENT_BLOCK |
-						    FETCH_EVENT_NO_GL_CHECK);
-				xGetButtonInput(); // Update global input
+		xSemaphoreTake(DrawSignal, portMAX_DELAY);
+		tumEventFetchEvents(FETCH_EVENT_BLOCK |
+					FETCH_EVENT_NO_GL_CHECK);
+		xGetButtonInput(); // Update global input
 
-				xSemaphoreTake(ScreenLock, portMAX_DELAY);
+		xSemaphoreTake(ScreenLock, portMAX_DELAY);
+		// Clear screen
+		checkDraw(tumDrawClear(BACKGROUND_COLOUR),
+				__FUNCTION__);
+		vDrawMenuText();
+		xSemaphoreGive(ScreenLock);
 
-				// Clear screen
-				checkDraw(tumDrawClear(BACKGROUND_COLOUR),
-					  __FUNCTION__);
-				vDrawMenuText();
-
-				xSemaphoreGive(ScreenLock);
-
-				vCheckKeyboardInput();
-			}
+		vCheckKeyboardInput();
 	}
 }
 
 void vGameLogic(void *pvParameters)
 {
 	while (1) {
+        vTaskDelay(portMAX_DELAY);
 	}
+}
+
+void vDrawGameObjects(void)
+{
+    checkDraw(tumDrawLoadedImage(my_spaceship.image, my_spaceship.x,
+                                my_spaceship.y),
+             __FUNCTION__);
+    checkDraw(tumDrawFilledBox(0, GREEN_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
+    checkDraw(tumDrawFilledBox(0, TOP_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
 }
 
 void vGameDrawer(void *pvParameters)
 {
+    TickType_t last_shot = xTaskGetTickCount();
+
 	prints("Game init'd\n");
 
 	while (1) {
@@ -523,11 +558,25 @@ void vGameDrawer(void *pvParameters)
 		xSemaphoreTake(ScreenLock, portMAX_DELAY);
 		checkDraw(tumDrawClear(BACKGROUND_COLOUR), __FUNCTION__);
 		vDrawGameText();
-
+        vDrawGameObjects();
 		xSemaphoreGive(ScreenLock);
 
 		vCheckKeyboardInput();
+        if (tumEventGetMouseLeft() == 1 && xTaskGetTickCount() - last_shot >
+            SHOOT_DEBOUNCE_DELAY) {
+            prints("SHOT\n");
+            last_shot = xTaskGetTickCount();
+        }
 	}
+}
+
+void vInitSpaceship(void)
+{
+    my_spaceship.image = tumDrawLoadImage(SPACESHIP_FILENAME);
+    my_spaceship.width = tumDrawGetLoadedImageWidth(my_spaceship.image);
+    my_spaceship.height = tumDrawGetLoadedImageHeight(my_spaceship.image);
+    my_spaceship.x = SCREEN_WIDTH / 2 - my_spaceship.width / 2;
+    my_spaceship.y = SPACESHIP_Y;
 }
 
 #define PRINT_TASK_ERROR(task) PRINT_ERROR("Failed to print task ##task");
@@ -570,8 +619,6 @@ int main(int argc, char *argv[])
 		goto err_init_safe_print;
 	}
 
-	logo_image = tumDrawLoadImage(LOGO_FILENAME);
-
 	//Load a second font for fun
 	tumFontLoadFont(FPS_FONT, DEFAULT_FONT_SIZE);
 
@@ -592,6 +639,12 @@ int main(int argc, char *argv[])
 	if (!ScreenLock) {
 		PRINT_ERROR("Failed to create screen lock");
 		goto err_screen_lock;
+	}
+
+    my_spaceship.lock = xSemaphoreCreateMutex();
+    if (!my_spaceship.lock) {
+		PRINT_ERROR("Failed to create spaceship lock");
+		goto err_spaceship_lock;
 	}
 
 	//Queues
@@ -647,6 +700,7 @@ int main(int argc, char *argv[])
 		goto err_GameDrawer;
 	}
 
+    vInitSpaceship();
 	vTaskSuspender();
 
 	vTaskStartScheduler();
@@ -667,6 +721,8 @@ err_statemachine:
 err_current_state_queue:
 	vQueueDelete(StateChangeQueue);
 err_state_change_queue:
+    vSemaphoreDelete(my_spaceship.lock);
+err_spaceship_lock:
 	vSemaphoreDelete(ScreenLock);
 err_screen_lock:
 	vSemaphoreDelete(DrawSignal);
