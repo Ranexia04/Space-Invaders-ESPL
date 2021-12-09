@@ -56,6 +56,8 @@
 #define TOP_LINE_Y 75
 #define SPACESHIP_Y SCREEN_HEIGHT - 75
 #define BULLET_HEIGHT 5
+#define N_ROWS 5
+#define N_COLUMNS 11
 
 #ifdef TRACE_FUNCTIONS
 #include "tracer.h"
@@ -121,8 +123,8 @@ typedef struct bullet {
 
     unsigned int colour;
 
-    callback_t callback; /**< Collision callback */
-    void *args; /**< Collision callback args */
+    callback_t callback; /**< bullet callback */
+    void *args; /**< bullet callback args */
     SemaphoreHandle_t lock;
 } bullet_t;
 
@@ -141,6 +143,25 @@ typedef struct colision {
     void *args; /**< Collision callback args */
     SemaphoreHandle_t lock;
 } colision_t;
+
+typedef struct monster {
+    image_handle_t image;
+
+    int x; /**< X pixel coord of monster on screen */
+    int y; /**< Y pixel coord of monster on screen */
+
+    signed short width;
+    signed short height;
+
+    int type;
+    int alive;
+
+    callback_t callback; /**< monster callback */
+    void *args; /**< monster callback args */
+    SemaphoreHandle_t lock;
+} monster_t;
+
+static monster_t my_monster[5][11] = { 0 };
 
 void checkDraw(unsigned char status, const char *msg)
 {
@@ -602,13 +623,12 @@ bullet_t *createBullet(int initial_x, int initial_y)
 
 void vShootBullet(void)
 {
-    prints("SHOT\n");
-
     bullet_t *my_bullet = createBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y - BULLET_HEIGHT);
     xQueueSend(BulletQueue, &my_bullet, portMAX_DELAY);
 }
 
 #define TOP_COLISION 0
+#define MONSTER_COLISION 1
 
 colision_t *createColision(int bullet_x, int bullet_y, int colision_type)
 {
@@ -620,6 +640,9 @@ colision_t *createColision(int bullet_x, int bullet_y, int colision_type)
     }
     if (colision_type == TOP_COLISION) {
         ret->image = tumDrawLoadImage("colision.png");
+    }
+    if (colision_type == MONSTER_COLISION) {
+        ret->image = tumDrawLoadImage("colision2.png");
     }
     ret->width = tumDrawGetLoadedImageWidth(ret->image);
     ret->height = tumDrawGetLoadedImageHeight(ret->image);
@@ -633,25 +656,44 @@ colision_t *createColision(int bullet_x, int bullet_y, int colision_type)
 
 void vCheckBulletColision(void)
 {
-    int i = 0, n_bullets;
+    int k = 0, i, j, n_bullets;
     bullet_t *my_bullet[10];
     colision_t *my_colision;
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
-        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
-        if (my_bullet[i]->y <= TOP_LINE_Y) {//bullet exceeded top limit
-            my_colision = createColision(my_bullet[i]->x, my_bullet[i]->y, TOP_COLISION);
+        xQueueReceive(BulletQueue, &my_bullet[k], portMAX_DELAY);
+        if (my_bullet[k]->y <= TOP_LINE_Y) {//bullet exceeded top limit
+            my_colision = createColision(my_bullet[k]->x, my_bullet[k]->y, TOP_COLISION);
             xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
-            vSemaphoreDelete(my_bullet[i]->lock);
-            free(my_bullet[i]);
-            i--;
+            vSemaphoreDelete(my_bullet[k]->lock);
+            free(my_bullet[k]);
+            k--;
         }
-        i++;
+
+        for (i = 0; i < N_ROWS; i++) {
+            for (j = 0; j < N_COLUMNS; j++) {
+                if (my_bullet[k]->y >= my_monster[i][j].y
+                            && my_bullet[k]->y <= my_monster[i][j].y + my_monster[i][j].height
+                            && my_bullet[k]->x >= my_monster[i][j].x
+                            && my_bullet[k]->x <= my_monster[i][j].x + my_monster[i][j].width
+                            && my_monster[i][j].alive == 1) {
+                    my_colision = createColision(my_monster[i][j].x + my_monster[i][j].width / 2, 
+                                            my_monster[i][j].y + my_monster[i][j].height / 2, MONSTER_COLISION);
+                    my_monster[i][j].alive = 0;
+                    xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
+                    vSemaphoreDelete(my_bullet[k]->lock);
+                    free(my_bullet[k]);
+                    k--;
+                }
+            }
+        }
+
+        k++;
     }
 
-    n_bullets = i;
-    for (i = 0; i < n_bullets; i++) {
-        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
+    n_bullets = k;
+    for (k = 0; k < n_bullets; k++) {
+        xQueueSend(BulletQueue, &my_bullet[k], portMAX_DELAY);
     }
     
 }
@@ -681,6 +723,7 @@ void vDrawGameObjects(void)
              __FUNCTION__);
     checkDraw(tumDrawFilledBox(0, GREEN_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
     //checkDraw(tumDrawFilledBox(0, TOP_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
+
 }
 
 void vDrawBullets(void)
@@ -725,6 +768,18 @@ void vDrawColisions(void)
     }
 }
 
+void vDrawMonsters(void)
+{
+    int i, j;
+
+    for (i = 0; i < N_ROWS; i++) {
+        for (j = 0; j < N_COLUMNS; j++) {
+            if (my_monster[i][j].alive)
+                checkDraw(tumDrawLoadedImage(my_monster[i][j].image, my_monster[i][j].x, my_monster[i][j].y), __FUNCTION__);
+        }
+    }
+}
+
 void vGameDrawer(void *pvParameters)
 {
 	prints("Game init'd\n");
@@ -737,6 +792,7 @@ void vGameDrawer(void *pvParameters)
 		checkDraw(tumDrawClear(BACKGROUND_COLOUR), __FUNCTION__);
 		vDrawGameText();
         vDrawGameObjects();
+        vDrawMonsters();
         vDrawBullets();
         vDrawColisions();
 		xSemaphoreGive(ScreenLock);
@@ -750,6 +806,42 @@ void vInitSpaceship(void)
     my_spaceship.height = tumDrawGetLoadedImageHeight(my_spaceship.image);
     my_spaceship.x = SCREEN_WIDTH / 2 - my_spaceship.width / 2;
     my_spaceship.y = SPACESHIP_Y;
+}
+
+void vInitMonsters(void)
+{
+    int h_spacing, v_spacing, i, j;
+    image_handle_t monster_png[3] = {NULL};
+    
+    monster_png[0] = tumDrawLoadImage("monster1.png");
+    monster_png[1] = tumDrawLoadImage("monster3.png");
+    monster_png[2] = tumDrawLoadImage("monster5.png");
+
+    h_spacing = tumDrawGetLoadedImageWidth(monster_png[2]);
+    v_spacing = tumDrawGetLoadedImageHeight(monster_png[2]);
+
+    for (i = 0; i < N_ROWS; i++) {
+        for (j = 0; j < N_COLUMNS; j++) {
+            if (i == 0) {
+                my_monster[i][j].type = 0;
+                my_monster[i][j].image = monster_png[0];
+            }
+            if (i == 1 || i == 2) {
+                my_monster[i][j].type = 1;
+                my_monster[i][j].image = monster_png[1];
+            }
+            if (i == 3 || i == 4) {
+                my_monster[i][j].type = 2;
+                my_monster[i][j].image = monster_png[2];
+            }
+            my_monster[i][j].width = tumDrawGetLoadedImageWidth(my_monster[i][j].image);
+            my_monster[i][j].height = tumDrawGetLoadedImageHeight(my_monster[i][j].image);
+            my_monster[i][j].x = 15 + h_spacing * 1.5 * j;
+            my_monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
+            my_monster[i][j].alive = 1;
+            my_monster[i][j].lock = xSemaphoreCreateMutex();
+        }
+    }
 }
 
 #define PRINT_TASK_ERROR(task) PRINT_ERROR("Failed to print task ##task");
@@ -890,7 +982,7 @@ int main(int argc, char *argv[])
     colision_image = tumDrawLoadImage("colision.png");
 
     vInitSpaceship();
-
+    vInitMonsters();
 	vTaskSuspender();
 
 	vTaskStartScheduler();
