@@ -57,6 +57,9 @@
 #define BULLET_HEIGHT 5
 #define N_ROWS 5
 #define N_COLUMNS 11
+#define SPACESHIP_BULLET 0
+#define MONSTER_BULLET 1
+#define MOTHERGUNSHIP_BULLET 2
 
 #ifdef TRACE_FUNCTIONS
 #include "tracer.h"
@@ -122,6 +125,8 @@ typedef struct bullet {
     signed short height;
 
     unsigned int colour;
+
+    int type;
 
     callback_t callback; /**< bullet callback */
     void *args; /**< bullet callback args */
@@ -651,12 +656,15 @@ void vMenuDrawer(void *pvParameters)
 void vUpdateBulletPosition(void)
 {
     int i = 0, n_bullets;
-    bullet_t *my_bullet[1000];
+    bullet_t *my_bullet[10];
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
         xSemaphoreTake(my_bullet[i]->lock, portMAX_DELAY);
-        my_bullet[i]->y = my_bullet[i]->y - 5;
+        if (my_bullet[i]->type == SPACESHIP_BULLET)
+            my_bullet[i]->y = my_bullet[i]->y - 5;
+        if (my_bullet[i]->type == MONSTER_BULLET || my_bullet[i]->type == MOTHERGUNSHIP_BULLET)
+            my_bullet[i]->y = my_bullet[i]->y + 5;
         xSemaphoreGive(my_bullet[i]->lock);
         i++;
     }
@@ -667,81 +675,78 @@ void vUpdateBulletPosition(void)
     }
 }
 
-bullet_t *createBullet(int initial_x, int initial_y)
+void vShootBullet(int initial_x, int initial_y, int type)
 {
-    bullet_t *ret = calloc(1, sizeof(bullet_t));
+    bullet_t *my_bullet = calloc(1, sizeof(bullet_t));
 
-    if (!ret) {
+     if (!my_bullet) {
         fprintf(stderr, "Creating bullet failed\n");
         exit(EXIT_FAILURE);
     }
 
-    ret->x = initial_x;
-    ret->y = initial_y;
-    ret->width = 1;
-    ret->height = BULLET_HEIGHT;
-    ret->colour = White;
-    ret->lock = xSemaphoreCreateMutex();
+    my_bullet->x = initial_x;
+    my_bullet->y = initial_y;
+    my_bullet->width = 1;
+    my_bullet->height = BULLET_HEIGHT;
+    my_bullet->type = type;
+    my_bullet->colour = White;
+    my_bullet->lock = xSemaphoreCreateMutex();
 
-    return ret;
-}
-
-void vShootBullet(void)
-{
-    bullet_t *my_bullet = createBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y - BULLET_HEIGHT);
     xQueueSend(BulletQueue, &my_bullet, portMAX_DELAY);
 }
 
 #define TOP_COLISION 0
 #define MONSTER_COLISION 1
 
-colision_t *createColision(int bullet_x, int bullet_y, int colision_type)
+void createColision(int bullet_x, int bullet_y, int colision_type)
 {
-    colision_t *ret = calloc(1, sizeof(colision_t));
+    colision_t *my_colision = calloc(1, sizeof(colision_t));
 
-    if (!ret) {
+    if (!my_colision) {
         fprintf(stderr, "Creating colision failed\n");
         exit(EXIT_FAILURE);
     }
     if (colision_type == TOP_COLISION) {
-        ret->image = tumDrawLoadImage("colision.png");
+        my_colision->image = tumDrawLoadImage("colision.png");
     }
     if (colision_type == MONSTER_COLISION) {
-        ret->image = tumDrawLoadImage("colision2.png");
+        my_colision->image = tumDrawLoadImage("colision2.png");
     }
-    ret->width = tumDrawGetLoadedImageWidth(ret->image);
-    ret->height = tumDrawGetLoadedImageHeight(ret->image);
-    ret->x = bullet_x - ret->width / 2;
-    ret->y = bullet_y - ret->height / 2;
-    ret->frame_number = 0;
-    ret->lock = xSemaphoreCreateMutex();
+    my_colision->width = tumDrawGetLoadedImageWidth(my_colision->image);
+    my_colision->height = tumDrawGetLoadedImageHeight(my_colision->image);
+    my_colision->x = bullet_x - my_colision->width / 2;
+    my_colision->y = bullet_y - my_colision->height / 2;
+    my_colision->frame_number = 0;
+    my_colision->lock = xSemaphoreCreateMutex();
 
-    return ret;
+    xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
 }
 
 void vCheckBulletColision(void)
 {
     int k = 0, i, j, n_bullets;
     bullet_t *my_bullet[10];
-    colision_t *my_colision;
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
+        printf("1\n");
         xQueueReceive(BulletQueue, &my_bullet[k], portMAX_DELAY);
-        if (my_bullet[k]->y <= TOP_LINE_Y) {//bullet exceeded top limit
-            my_colision = createColision(my_bullet[k]->x, my_bullet[k]->y, TOP_COLISION);
-            xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
+        if (my_bullet[k]->y <= TOP_LINE_Y && my_bullet[k]->type == SPACESHIP_BULLET) {//bullet exceeded top limit
+            createColision(my_bullet[k]->x, my_bullet[k]->y, TOP_COLISION);
             vSemaphoreDelete(my_bullet[k]->lock);
             free(my_bullet[k]);
             k--;
+            printf("2\n");
         }
+        printf("3\n");
 
         for (i = 0; i < N_ROWS; i++) {
             for (j = 0; j < N_COLUMNS; j++) {
+                printf("%d %d\n", i, j);
                 if (my_bullet[k]->y >= my_monster[i][j].y
                             && my_bullet[k]->y <= my_monster[i][j].y + my_monster[i][j].height
                             && my_bullet[k]->x >= my_monster[i][j].x
                             && my_bullet[k]->x <= my_monster[i][j].x + my_monster[i][j].width
-                            && my_monster[i][j].alive == 1) {
+                            && my_monster[i][j].alive == 1 && my_bullet[k]->type == SPACESHIP_BULLET) {
                     xSemaphoreTake(my_player.lock, portMAX_DELAY);//TALVEZ FAZER FUNÇÃO QUE DEIA REPLACE NESTE BLOCO PARA FICAR MAIS FACIL DE LER
                     if (my_monster[i][j].type == 0)
                         my_player.score1 = my_player.score1 + 30;
@@ -752,24 +757,35 @@ void vCheckBulletColision(void)
                     if (my_player.score1 > my_player.highscore)
                         my_player.highscore = my_player.score1;
                     xSemaphoreGive(my_player.lock);
-                    my_colision = createColision(my_monster[i][j].x + my_monster[i][j].width / 2, 
+                    createColision(my_monster[i][j].x + my_monster[i][j].width / 2, 
                                             my_monster[i][j].y + my_monster[i][j].height / 2, MONSTER_COLISION);
-                    xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
+                    xSemaphoreTake(my_monster[i][j].lock, portMAX_DELAY);
                     my_monster[i][j].alive = 0;
+                    xSemaphoreGive(my_monster[i][j].lock);
                     vSemaphoreDelete(my_bullet[k]->lock);
                     free(my_bullet[k]);
                     k--;
                 }
+                printf("%d %dLMAO\n",i,j);
             }
+        }
+
+        if (my_bullet[k]->y + BULLET_HEIGHT >= GREEN_LINE_Y && my_bullet[k]->type == MONSTER_BULLET) {
+            createColision(my_bullet[k]->x, my_bullet[k]->y + BULLET_HEIGHT, TOP_COLISION);
+            vSemaphoreDelete(my_bullet[k]->lock);
+            free(my_bullet[k]);
+            k--;
+            printf("5\n");
         }
 
         k++;
     }
-
+    printf("6\n");
     n_bullets = k;
     for (k = 0; k < n_bullets; k++) {
         xQueueSend(BulletQueue, &my_bullet[k], portMAX_DELAY);
     }
+    printf("7\n");
     
 }
 
@@ -784,7 +800,7 @@ void vGameLogic(void *pvParameters)
         vCheckBulletColision();
         if (tumEventGetMouseLeft() == 1 && xTaskGetTickCount() - last_shot >
             SHOOT_DEBOUNCE_DELAY) {
-            vShootBullet();
+            vShootBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y, SPACESHIP_BULLET);
             last_shot = xTaskGetTickCount();
         }
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -824,7 +840,7 @@ void vDrawColisions(void)
 
     while(uxQueueMessagesWaiting(ColisionQueue)) {
         xQueueReceive(ColisionQueue, &my_colision[i], portMAX_DELAY);
-        tumDrawLoadedImage(my_colision[i]->image, my_colision[i]->x, my_colision[i]->y);
+        checkDraw(tumDrawLoadedImage(my_colision[i]->image, my_colision[i]->x, my_colision[i]->y), __FUNCTION__);
         xSemaphoreTake(my_colision[i]->lock, portMAX_DELAY);
         my_colision[i]->frame_number++;
         xSemaphoreGive(my_colision[i]->lock);
@@ -878,10 +894,7 @@ void vMonsterBulletShooter(void *pvParameters) {
     int shooter_column, shooter_row, i;
 
     while (1) {
-        prints("MonsterShot\n");
-bad_roll:
-        shooter_column = rand() % 11;
-        prints("%d\n", shooter_column);
+        shooter_column = rand() % N_COLUMNS;
         
         for (i = N_ROWS - 1; i >= 0; i--) {
             if (my_monster[i][shooter_column].alive) {
@@ -890,9 +903,10 @@ bad_roll:
             }
         }
         if (i == -1)
-            goto bad_roll;
+            continue;
 
-        //vShootBullet();
+        vShootBullet(my_monster[shooter_row][shooter_column].x + my_monster[shooter_row][shooter_column].width / 2,
+                     my_monster[shooter_row][shooter_column].y + my_monster[shooter_row][shooter_column].height, MONSTER_BULLET);
         vTaskDelayUntil(&xLastShot, pdMS_TO_TICKS(2500));
     }
 }
