@@ -54,6 +54,7 @@
 #define GREEN_LINE_Y SCREEN_HEIGHT - 38
 #define TOP_LINE_Y 75
 #define SPACESHIP_Y SCREEN_HEIGHT - 75
+#define MOTHERGUNSHIP_Y 83
 #define BULLET_HEIGHT 5
 #define N_ROWS 5
 #define N_COLUMNS 11
@@ -75,7 +76,7 @@ static TaskHandle_t GameLogic = NULL;
 static TaskHandle_t GameDrawer = NULL;
 static TaskHandle_t MonsterBulletShooter = NULL;
 
-//Timers here if needed
+static TimerHandle_t xMothergunshipTimer;
 
 static StaticTask_t GameDrawerBuffer;
 static StackType_t xStack[STACK_SIZE];
@@ -180,6 +181,22 @@ typedef struct player {
 
 static player_t my_player = { 0 };
 
+typedef struct mothergunship {
+    image_handle_t image;
+    int x; /**< X pixel coord of mothergunship on screen */
+    int y; /**< Y pixel coord of mothergunship on screen */
+
+    signed short width;
+    signed short height;
+
+    int alive;
+    int direction;
+
+    SemaphoreHandle_t lock;
+} mothergunship_t;
+
+static mothergunship_t my_mothergunship = { 0 };
+
 void vResetSpaceship(void)
 {
     xSemaphoreTake(my_spaceship.lock, portMAX_DELAY);
@@ -252,6 +269,38 @@ void vInitPlayer(void)
     my_player.n_lives = 3;
     my_player.credits = 0;
     my_player.lock = xSemaphoreCreateMutex();
+}
+
+#define LEFT_TO_RIGHT 0
+#define RIGHT_TO_LEFT 1
+
+void vResetMothergunship(void)
+{
+    xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
+    my_mothergunship.direction = !my_mothergunship.direction;
+    if (my_mothergunship.direction == LEFT_TO_RIGHT)
+        my_mothergunship.x = -1 * my_mothergunship.width;
+    if (my_mothergunship.direction == RIGHT_TO_LEFT)
+        my_mothergunship.x = SCREEN_WIDTH;
+    my_mothergunship.alive = 1;
+    xSemaphoreGive(my_mothergunship.lock);
+}
+
+void vMothergunshipTimerCallback(TimerHandle_t xMothergunshipTimer)
+{
+    vResetMothergunship();
+}
+
+void vInitMothergunship(void)
+{
+    my_mothergunship.image = mothergunship_image;
+    my_mothergunship.x = 0;
+    my_mothergunship.y = MOTHERGUNSHIP_Y;
+    my_mothergunship.width = tumDrawGetLoadedImageWidth(my_mothergunship.image);
+    my_mothergunship.height = tumDrawGetLoadedImageHeight(my_mothergunship.image);
+    my_mothergunship.alive = 0;
+    my_mothergunship.direction = RIGHT_TO_LEFT;
+    my_mothergunship.lock = xSemaphoreCreateMutex();
 }
 
 void checkDraw(unsigned char status, const char *msg)
@@ -485,6 +534,7 @@ void basicSequentialStateMachine(void *pvParameters)
 				}
 				break;
 			case GAME:
+                xTimerReset(xMothergunshipTimer, portMAX_DELAY);
 				if (GameDrawer) {
 					vTaskResume(GameDrawer);
 				}
@@ -763,7 +813,7 @@ void vCheckBulletColision(void)
 
         for (i = 0; i < N_ROWS; i++) {
             for (j = 0; j < N_COLUMNS; j++) {
-                if (my_bullet[k]->y >= my_monster[i][j].y
+                if (my_bullet[k]->y - BULLET_HEIGHT >= my_monster[i][j].y
                             && my_bullet[k]->y <= my_monster[i][j].y + my_monster[i][j].height
                             && my_bullet[k]->x >= my_monster[i][j].x
                             && my_bullet[k]->x <= my_monster[i][j].x + my_monster[i][j].width
@@ -800,7 +850,6 @@ void vCheckBulletColision(void)
                             && my_bullet[k]->y <= my_spaceship.y + my_spaceship.height
                             && my_bullet[k]->x >= my_spaceship.x
                             && my_bullet[k]->x <= my_spaceship.x + my_spaceship.width
-                            && my_monster[i][j].alive == 1 
                             && (my_bullet[k]->type == MONSTER_BULLET || my_bullet[k]->type == MOTHERGUNSHIP_BULLET)) {
             xSemaphoreTake(my_player.lock, portMAX_DELAY);
             my_player.n_lives--;
@@ -809,6 +858,24 @@ void vCheckBulletColision(void)
             vSemaphoreDelete(my_bullet[k]->lock);
             free(my_bullet[k]);
             vResetSpaceship();
+            goto colision_detected;
+        }
+
+        if (my_bullet[k]->y - BULLET_HEIGHT >= my_mothergunship.y
+                            && my_bullet[k]->y <= my_mothergunship.y + my_mothergunship.height
+                            && my_bullet[k]->x >= my_mothergunship.x
+                            && my_bullet[k]->x <= my_mothergunship.x + my_mothergunship.width
+                            && my_mothergunship.alive == 1 
+                            && my_bullet[k]->type == SPACESHIP_BULLET) {
+            xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
+            my_mothergunship.alive = 0;
+            xSemaphoreGive(my_mothergunship.lock);
+            xSemaphoreTake(my_player.lock, portMAX_DELAY);
+            my_player.score1 = my_player.score1 + 50;
+            xSemaphoreGive(my_player.lock);
+            createColision(my_mothergunship.x + my_mothergunship.width / 2, my_mothergunship.y + my_mothergunship.height / 2, MONSTER_COLISION);
+            vSemaphoreDelete(my_bullet[k]->lock);
+            free(my_bullet[k]);
             goto colision_detected;
         }
 
@@ -851,7 +918,25 @@ void vCheckPlayerDead(void)
         }
         my_player.score1 = 0;
         vResetMonsters();
+        xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+        vInitMothergunship();
         xSemaphoreGive(my_player.lock);
+    }
+}
+
+void vUpdateMothergunshipPosition(void)
+{
+    if (my_mothergunship.alive) {
+        xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
+        if (my_mothergunship.direction == LEFT_TO_RIGHT)
+            my_mothergunship.x = my_mothergunship.x + 1;
+        if (my_mothergunship.direction == RIGHT_TO_LEFT)
+            my_mothergunship.x = my_mothergunship.x - 1;
+        if (my_mothergunship.x > SCREEN_WIDTH) {
+            my_mothergunship.alive = 0;
+            xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+        }
+        xSemaphoreGive(my_mothergunship.lock);
     }
 }
 
@@ -860,9 +945,10 @@ void vGameLogic(void *pvParameters)
     TickType_t last_shot = xTaskGetTickCount();
 
 	while (1) {
-        xGetButtonInput(); // Update global input
+        xGetButtonInput();
         vCheckKeyboardInput();
         vUpdateBulletPosition();
+        vUpdateMothergunshipPosition();
         vCheckBulletColision();
         vCheckMonstersDead();
         vCheckPlayerDead();
@@ -873,19 +959,6 @@ void vGameLogic(void *pvParameters)
         }
         vTaskDelay(pdMS_TO_TICKS(10));
 	}
-}
-
-void vDrawGameObjects(void)
-{
-    checkDraw(tumDrawLoadedImage(my_spaceship.image, my_spaceship.x,
-                                my_spaceship.y),
-             __FUNCTION__);
-    checkDraw(tumDrawFilledBox(0, GREEN_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
-    //checkDraw(tumDrawFilledBox(0, TOP_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
-    if (my_player.n_lives >= 2)
-        checkDraw(tumDrawLoadedImage(my_spaceship.image, 55, LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
-    if (my_player.n_lives >= 3)
-        checkDraw(tumDrawLoadedImage(my_spaceship.image, 55 + my_spaceship.width * 1.2, LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
 }
 
 void vDrawBullets(void)
@@ -942,6 +1015,26 @@ void vDrawMonsters(void)
     }
 }
 
+void vDrawGameObjects(void)
+{
+    checkDraw(tumDrawLoadedImage(my_spaceship.image, my_spaceship.x,
+                                my_spaceship.y),
+             __FUNCTION__);
+    checkDraw(tumDrawFilledBox(0, GREEN_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
+    
+    if (my_player.n_lives >= 2)
+        checkDraw(tumDrawLoadedImage(my_spaceship.image, 55, LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
+    if (my_player.n_lives >= 3)
+        checkDraw(tumDrawLoadedImage(my_spaceship.image, 55 + my_spaceship.width * 1.2, LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
+    
+    vDrawMonsters();
+    vDrawBullets();
+    vDrawColisions();
+
+    if (my_mothergunship.alive)
+        checkDraw(tumDrawLoadedImage(my_mothergunship.image, my_mothergunship.x, my_mothergunship.y), __FUNCTION__);
+}
+
 void vGameDrawer(void *pvParameters)
 {
 	prints("Game init'd\n");
@@ -954,9 +1047,6 @@ void vGameDrawer(void *pvParameters)
 		checkDraw(tumDrawClear(BACKGROUND_COLOUR), __FUNCTION__);
 		vDrawGameText();
         vDrawGameObjects();
-        vDrawMonsters();
-        vDrawBullets();
-        vDrawColisions();
 		xSemaphoreGive(ScreenLock);
 	}
 }
@@ -1081,6 +1171,11 @@ int main(int argc, char *argv[])
 	}
 
 	//Timers
+    xMothergunshipTimer = xTimerCreate("Mothergunship Timer", pdMS_TO_TICKS(10000), pdTRUE, (void *) 0, vMothergunshipTimerCallback);
+    if (xMothergunshipTimer == NULL) {
+        PRINT_ERROR("Could not open mothergunship timer");
+        goto err_mothergunship_timer;
+    }
 
 	//Infrastructure Tasks
 	if (xTaskCreate(basicSequentialStateMachine, "StateMachine",
@@ -1134,6 +1229,7 @@ int main(int argc, char *argv[])
     vInitPlayer();
     vInitSpaceship();
     vInitMonsters();
+    vInitMothergunship();
 	vTaskSuspender();
 
 	vTaskStartScheduler();
@@ -1152,6 +1248,8 @@ err_game_logic:
 err_bufferswap:
 	vTaskDelete(StateMachine);
 err_statemachine:
+    xTimerDelete(xMothergunshipTimer, portMAX_DELAY);
+err_mothergunship_timer:
     vQueueDelete(ColisionQueue);
 err_colision_queue:
     vQueueDelete(BulletQueue);
