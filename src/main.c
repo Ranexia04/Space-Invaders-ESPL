@@ -189,6 +189,22 @@ void vInitSpaceship(void)
     my_spaceship.y = SPACESHIP_Y;
 }
 
+void vResetMonsters(void)
+{
+    int h_spacing, v_spacing, i, j;
+
+    h_spacing = tumDrawGetLoadedImageWidth(monster_image[2]);
+    v_spacing = tumDrawGetLoadedImageHeight(monster_image[2]);
+
+    for (i = 0; i < N_ROWS; i++) {
+        for (j = 0; j < N_COLUMNS; j++) {
+            my_monster[i][j].x = 15 + h_spacing * 1.5 * j;
+            my_monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
+            my_monster[i][j].alive = 1;
+        }
+    }
+}
+
 void vInitMonsters(void)
 {
     int h_spacing, v_spacing, i, j;
@@ -728,20 +744,16 @@ void vCheckBulletColision(void)
     bullet_t *my_bullet[10];
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
-        printf("1\n");
         xQueueReceive(BulletQueue, &my_bullet[k], portMAX_DELAY);
         if (my_bullet[k]->y <= TOP_LINE_Y && my_bullet[k]->type == SPACESHIP_BULLET) {//bullet exceeded top limit
             createColision(my_bullet[k]->x, my_bullet[k]->y, TOP_COLISION);
             vSemaphoreDelete(my_bullet[k]->lock);
             free(my_bullet[k]);
-            k--;
-            printf("2\n");
+            goto colision_detected;
         }
-        printf("3\n");
 
         for (i = 0; i < N_ROWS; i++) {
             for (j = 0; j < N_COLUMNS; j++) {
-                printf("%d %d\n", i, j);
                 if (my_bullet[k]->y >= my_monster[i][j].y
                             && my_bullet[k]->y <= my_monster[i][j].y + my_monster[i][j].height
                             && my_bullet[k]->x >= my_monster[i][j].x
@@ -764,29 +776,66 @@ void vCheckBulletColision(void)
                     xSemaphoreGive(my_monster[i][j].lock);
                     vSemaphoreDelete(my_bullet[k]->lock);
                     free(my_bullet[k]);
-                    k--;
+                    goto colision_detected;
                 }
-                printf("%d %dLMAO\n",i,j);
             }
         }
 
-        if (my_bullet[k]->y + BULLET_HEIGHT >= GREEN_LINE_Y && my_bullet[k]->type == MONSTER_BULLET) {
+        if (my_bullet[k]->y + BULLET_HEIGHT >= GREEN_LINE_Y 
+                            && (my_bullet[k]->type == MONSTER_BULLET || my_bullet[k]->type == MOTHERGUNSHIP_BULLET)) {
             createColision(my_bullet[k]->x, my_bullet[k]->y + BULLET_HEIGHT, TOP_COLISION);
             vSemaphoreDelete(my_bullet[k]->lock);
             free(my_bullet[k]);
-            k--;
-            printf("5\n");
+            goto colision_detected;
         }
 
-        k++;
+        if (my_bullet[k]->y + BULLET_HEIGHT >= my_spaceship.y
+                            && my_bullet[k]->y <= my_spaceship.y + my_spaceship.height
+                            && my_bullet[k]->x >= my_spaceship.x
+                            && my_bullet[k]->x <= my_spaceship.x + my_spaceship.width
+                            && my_monster[i][j].alive == 1 
+                            && (my_bullet[k]->type == MONSTER_BULLET || my_bullet[k]->type == MOTHERGUNSHIP_BULLET)) {
+            xSemaphoreTake(my_player.lock, portMAX_DELAY);
+            my_player.n_lives--;
+            xSemaphoreGive(my_player.lock);
+            createColision(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y + my_spaceship.height / 2, MONSTER_COLISION);
+            vSemaphoreDelete(my_bullet[k]->lock);
+            free(my_bullet[k]);
+            goto colision_detected;
+        }
+
+        k++;// does not get here if bullet gets killed
+        continue;
+
+    colision_detected:
+        continue;
     }
-    printf("6\n");
+
     n_bullets = k;
     for (k = 0; k < n_bullets; k++) {
         xQueueSend(BulletQueue, &my_bullet[k], portMAX_DELAY);
     }
-    printf("7\n");
     
+}
+
+void vCheckMonstersDead(void)
+{
+    int i, j, n_monster_alive = 0;
+
+    for (i = 0; i < N_ROWS; i++) {
+        for (j = 0; j < N_COLUMNS; j++) {
+            if (my_monster[i][j].alive)
+                n_monster_alive++;
+        }
+    }
+
+    if (!n_monster_alive)
+        vResetMonsters();
+}
+
+void vCheckPlayerDead(void)
+{
+
 }
 
 void vGameLogic(void *pvParameters)
@@ -798,6 +847,8 @@ void vGameLogic(void *pvParameters)
         vCheckKeyboardInput();
         vUpdateBulletPosition();
         vCheckBulletColision();
+        vCheckMonstersDead();
+        vCheckPlayerDead();
         if (tumEventGetMouseLeft() == 1 && xTaskGetTickCount() - last_shot >
             SHOOT_DEBOUNCE_DELAY) {
             vShootBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y, SPACESHIP_BULLET);
@@ -814,6 +865,10 @@ void vDrawGameObjects(void)
              __FUNCTION__);
     checkDraw(tumDrawFilledBox(0, GREEN_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
     //checkDraw(tumDrawFilledBox(0, TOP_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
+    if (my_player.n_lives >= 2)
+        checkDraw(tumDrawLoadedImage(my_spaceship.image, 55, LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
+    if (my_player.n_lives >= 3)
+        checkDraw(tumDrawLoadedImage(my_spaceship.image, 55 + my_spaceship.width * 1.2, LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
 }
 
 void vDrawBullets(void)
