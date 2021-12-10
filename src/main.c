@@ -51,7 +51,6 @@
 #define PI 3.142857
 #define FREQ 1
 #define RADIUS 40
-#define SPACESHIP_FILENAME "spaceship.png"
 #define GREEN_LINE_Y SCREEN_HEIGHT - 38
 #define TOP_LINE_Y 75
 #define SPACESHIP_Y SCREEN_HEIGHT - 75
@@ -70,8 +69,8 @@ static TaskHandle_t StateMachine = NULL;
 static TaskHandle_t BufferSwap = NULL;
 static TaskHandle_t MenuDrawer = NULL;
 static TaskHandle_t GameLogic = NULL;
-
 static TaskHandle_t GameDrawer = NULL;
+static TaskHandle_t MonsterBulletShooter = NULL;
 
 //Timers here if needed
 
@@ -86,7 +85,8 @@ static QueueHandle_t ColisionQueue = NULL;
 static SemaphoreHandle_t DrawSignal = NULL;
 static SemaphoreHandle_t ScreenLock = NULL;
 
-static image_handle_t colision_image = NULL;
+static image_handle_t monster_image[3] = {NULL};
+static image_handle_t mothergunship_image = NULL;
 
 typedef struct buttons_buffer {
 	unsigned char buttons[SDL_NUM_SCANCODES];
@@ -162,6 +162,67 @@ typedef struct monster {
 } monster_t;
 
 static monster_t my_monster[5][11] = { 0 };
+
+typedef struct player {
+    int score1; /**< X pixel coord of monster on screen */
+    int highscore; /**< Y pixel coord of monster on screen */
+    int score2;
+    int n_lives;
+    int credits;
+
+    SemaphoreHandle_t lock;
+} player_t;
+
+static player_t my_player = { 0 };
+
+void vInitSpaceship(void)
+{
+    my_spaceship.image = tumDrawLoadImage("spaceship.png");
+    my_spaceship.width = tumDrawGetLoadedImageWidth(my_spaceship.image);
+    my_spaceship.height = tumDrawGetLoadedImageHeight(my_spaceship.image);
+    my_spaceship.x = SCREEN_WIDTH / 2 - my_spaceship.width / 2;
+    my_spaceship.y = SPACESHIP_Y;
+}
+
+void vInitMonsters(void)
+{
+    int h_spacing, v_spacing, i, j;
+
+    h_spacing = tumDrawGetLoadedImageWidth(monster_image[2]);
+    v_spacing = tumDrawGetLoadedImageHeight(monster_image[2]);
+
+    for (i = 0; i < N_ROWS; i++) {
+        for (j = 0; j < N_COLUMNS; j++) {
+            if (i == 0) {
+                my_monster[i][j].type = 0;
+                my_monster[i][j].image = monster_image[0];
+            }
+            if (i == 1 || i == 2) {
+                my_monster[i][j].type = 1;
+                my_monster[i][j].image = monster_image[1];
+            }
+            if (i == 3 || i == 4) {
+                my_monster[i][j].type = 2;
+                my_monster[i][j].image = monster_image[2];
+            }
+            my_monster[i][j].width = tumDrawGetLoadedImageWidth(my_monster[i][j].image);
+            my_monster[i][j].height = tumDrawGetLoadedImageHeight(my_monster[i][j].image);
+            my_monster[i][j].x = 15 + h_spacing * 1.5 * j;
+            my_monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
+            my_monster[i][j].alive = 1;
+            my_monster[i][j].lock = xSemaphoreCreateMutex();
+        }
+    }
+}
+
+void vInitPlayer(void)
+{
+    my_player.score1 = 0;
+    my_player.score2 = 0;
+    my_player.n_lives = 3;
+    my_player.credits = 0;
+    my_player.lock = xSemaphoreCreateMutex();
+}
 
 void checkDraw(unsigned char status, const char *msg)
 {
@@ -314,30 +375,24 @@ void vDrawNumber(int number, int x, int y, int n_digits)
 
 void vDrawScores(void)
 {
-    int score1 = 0, hiscore = 0;
-
     vDrawText("SCORE<1>", 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
-    vDrawNumber(score1, 45, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
+    vDrawNumber(my_player.score1, 45, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
     vDrawText("HI-SCORE", SCREEN_WIDTH / 3 + 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
-    vDrawNumber(hiscore, SCREEN_WIDTH / 3 + 25, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
+    vDrawNumber(my_player.highscore, SCREEN_WIDTH / 3 + 25, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
     vDrawText("SCORE<2>", SCREEN_WIDTH * 2 / 3 + 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
 }
 
 void vDrawCredit(void)
 {
-    int credit = 0;
-
     vDrawText("CREDIT", SCREEN_WIDTH * 2 / 3 - 20, LOWER_TEXT_YLOCATION, NOT_CENTERING);
-    vDrawNumber(credit, SCREEN_WIDTH - 55, LOWER_TEXT_YLOCATION, 2);
+    vDrawNumber(my_player.credits, SCREEN_WIDTH - 55, LOWER_TEXT_YLOCATION, 2);
 }
 
 void vDrawGameText(void)
 {
-    int n_lives = 3;
-
     vDrawScores();
     vDrawCredit();
-    vDrawNumber(n_lives, 20, LOWER_TEXT_YLOCATION, 1);
+    vDrawNumber(my_player.n_lives, 20, LOWER_TEXT_YLOCATION, 1);
 
 }
 
@@ -352,6 +407,9 @@ void vTaskSuspender()
 	if (GameLogic) {
 		vTaskSuspend(GameLogic);
 	}
+    if (MonsterBulletShooter) {
+		vTaskSuspend(MonsterBulletShooter);
+    }
 }
 
 void basicSequentialStateMachine(void *pvParameters)
@@ -402,7 +460,10 @@ void basicSequentialStateMachine(void *pvParameters)
 				}
 				if (GameLogic) {
 					vTaskResume(GameLogic);
-				}
+                }
+                if (MonsterBulletShooter) {
+					vTaskResume(MonsterBulletShooter);
+                }
 				break;
 			default:
 				break;
@@ -555,9 +616,13 @@ void vDrawMenuText(void)
     vDrawText("PLAY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4, CENTERING);
     vDrawText("SPACE INVADERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, CENTERING);
     vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
+    checkDraw(tumDrawLoadedImage(mothergunship_image, SCREEN_WIDTH / 5 - 5, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5 - 10), __FUNCTION__);
     vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
+    checkDraw(tumDrawLoadedImage(monster_image[0], SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3 - 5), __FUNCTION__);
     vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3, CENTERING);
+    checkDraw(tumDrawLoadedImage(monster_image[1], SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5 - 5), __FUNCTION__);
     vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5, CENTERING);
+    checkDraw(tumDrawLoadedImage(monster_image[2], SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6 - 5), __FUNCTION__);
     vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6, CENTERING);
     vDrawCredit();
 }
@@ -677,10 +742,20 @@ void vCheckBulletColision(void)
                             && my_bullet[k]->x >= my_monster[i][j].x
                             && my_bullet[k]->x <= my_monster[i][j].x + my_monster[i][j].width
                             && my_monster[i][j].alive == 1) {
+                    xSemaphoreTake(my_player.lock, portMAX_DELAY);//TALVEZ FAZER FUNÇÃO QUE DEIA REPLACE NESTE BLOCO PARA FICAR MAIS FACIL DE LER
+                    if (my_monster[i][j].type == 0)
+                        my_player.score1 = my_player.score1 + 30;
+                    if (my_monster[i][j].type == 1)
+                        my_player.score1 = my_player.score1 + 20;
+                    if (my_monster[i][j].type == 2)
+                        my_player.score1 = my_player.score1 + 10;
+                    if (my_player.score1 > my_player.highscore)
+                        my_player.highscore = my_player.score1;
+                    xSemaphoreGive(my_player.lock);
                     my_colision = createColision(my_monster[i][j].x + my_monster[i][j].width / 2, 
                                             my_monster[i][j].y + my_monster[i][j].height / 2, MONSTER_COLISION);
-                    my_monster[i][j].alive = 0;
                     xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
+                    my_monster[i][j].alive = 0;
                     vSemaphoreDelete(my_bullet[k]->lock);
                     free(my_bullet[k]);
                     k--;
@@ -723,7 +798,6 @@ void vDrawGameObjects(void)
              __FUNCTION__);
     checkDraw(tumDrawFilledBox(0, GREEN_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
     //checkDraw(tumDrawFilledBox(0, TOP_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
-
 }
 
 void vDrawBullets(void)
@@ -799,48 +873,27 @@ void vGameDrawer(void *pvParameters)
 	}
 }
 
-void vInitSpaceship(void)
-{
-    my_spaceship.image = tumDrawLoadImage(SPACESHIP_FILENAME);
-    my_spaceship.width = tumDrawGetLoadedImageWidth(my_spaceship.image);
-    my_spaceship.height = tumDrawGetLoadedImageHeight(my_spaceship.image);
-    my_spaceship.x = SCREEN_WIDTH / 2 - my_spaceship.width / 2;
-    my_spaceship.y = SPACESHIP_Y;
-}
+void vMonsterBulletShooter(void *pvParameters) {
+    TickType_t xLastShot = xTaskGetTickCount();
+    int shooter_column, shooter_row, i;
 
-void vInitMonsters(void)
-{
-    int h_spacing, v_spacing, i, j;
-    image_handle_t monster_png[3] = {NULL};
-    
-    monster_png[0] = tumDrawLoadImage("monster1.png");
-    monster_png[1] = tumDrawLoadImage("monster3.png");
-    monster_png[2] = tumDrawLoadImage("monster5.png");
-
-    h_spacing = tumDrawGetLoadedImageWidth(monster_png[2]);
-    v_spacing = tumDrawGetLoadedImageHeight(monster_png[2]);
-
-    for (i = 0; i < N_ROWS; i++) {
-        for (j = 0; j < N_COLUMNS; j++) {
-            if (i == 0) {
-                my_monster[i][j].type = 0;
-                my_monster[i][j].image = monster_png[0];
+    while (1) {
+        prints("MonsterShot\n");
+bad_roll:
+        shooter_column = rand() % 11;
+        prints("%d\n", shooter_column);
+        
+        for (i = N_ROWS - 1; i >= 0; i--) {
+            if (my_monster[i][shooter_column].alive) {
+                shooter_row = i;
+                break;
             }
-            if (i == 1 || i == 2) {
-                my_monster[i][j].type = 1;
-                my_monster[i][j].image = monster_png[1];
-            }
-            if (i == 3 || i == 4) {
-                my_monster[i][j].type = 2;
-                my_monster[i][j].image = monster_png[2];
-            }
-            my_monster[i][j].width = tumDrawGetLoadedImageWidth(my_monster[i][j].image);
-            my_monster[i][j].height = tumDrawGetLoadedImageHeight(my_monster[i][j].image);
-            my_monster[i][j].x = 15 + h_spacing * 1.5 * j;
-            my_monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
-            my_monster[i][j].alive = 1;
-            my_monster[i][j].lock = xSemaphoreCreateMutex();
         }
+        if (i == -1)
+            goto bad_roll;
+
+        //vShootBullet();
+        vTaskDelayUntil(&xLastShot, pdMS_TO_TICKS(2500));
     }
 }
 
@@ -963,6 +1016,12 @@ int main(int argc, char *argv[])
 		goto err_game_logic;
 	}
 
+    if (xTaskCreate(vMonsterBulletShooter, "MonsterBulletShooter", STACK_SIZE,
+			NULL, mainGENERIC_PRIORITY + 3, &MonsterBulletShooter) != pdPASS) {
+		PRINT_TASK_ERROR("MonsterBulletShooter");
+		goto err_monster_bullet_shooter;
+	}
+
 	//Normal Tasks
 	if (xTaskCreate(vMenuDrawer, "MenuDrawer", STACK_SIZE,
 			NULL, mainGENERIC_PRIORITY + 1,
@@ -979,8 +1038,14 @@ int main(int argc, char *argv[])
 		goto err_GameDrawer;
 	}
 
-    colision_image = tumDrawLoadImage("colision.png");
+    monster_image[0] = tumDrawLoadImage("monster1.png");
+    monster_image[1] = tumDrawLoadImage("monster3.png");
+    monster_image[2] = tumDrawLoadImage("monster5.png");
+    mothergunship_image = tumDrawLoadImage("mothergunship.png");
 
+    srand(1);
+
+    vInitPlayer();
     vInitSpaceship();
     vInitMonsters();
 	vTaskSuspender();
@@ -993,6 +1058,8 @@ int main(int argc, char *argv[])
 err_GameDrawer:
 	vTaskDelete(MenuDrawer);
 err_MenuDrawer:
+    vTaskDelete(MonsterBulletShooter);
+err_monster_bullet_shooter:
 	vTaskDelete(GameLogic);
 err_game_logic:
 	vTaskDelete(BufferSwap);
