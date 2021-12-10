@@ -166,7 +166,7 @@ typedef struct monster {
     SemaphoreHandle_t lock;
 } monster_t;
 
-static monster_t my_monster[5][11] = { 0 };
+static monster_t my_monster[N_ROWS][N_COLUMNS] = { 0 };
 
 typedef struct player {
     int score1; /**< X pixel coord of monster on screen */
@@ -179,6 +179,13 @@ typedef struct player {
 } player_t;
 
 static player_t my_player = { 0 };
+
+void vResetSpaceship(void)
+{
+    xSemaphoreTake(my_spaceship.lock, portMAX_DELAY);
+    my_spaceship.x = SCREEN_WIDTH / 2 - my_spaceship.width / 2;
+    xSemaphoreGive(my_spaceship.lock);
+}
 
 void vInitSpaceship(void)
 {
@@ -198,9 +205,11 @@ void vResetMonsters(void)
 
     for (i = 0; i < N_ROWS; i++) {
         for (j = 0; j < N_COLUMNS; j++) {
+            xSemaphoreTake(my_monster[i][j].lock, portMAX_DELAY);
             my_monster[i][j].x = 15 + h_spacing * 1.5 * j;
             my_monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
             my_monster[i][j].alive = 1;
+            xSemaphoreGive(my_monster[i][j].lock);
         }
     }
 }
@@ -766,8 +775,6 @@ void vCheckBulletColision(void)
                         my_player.score1 = my_player.score1 + 20;
                     if (my_monster[i][j].type == 2)
                         my_player.score1 = my_player.score1 + 10;
-                    if (my_player.score1 > my_player.highscore)
-                        my_player.highscore = my_player.score1;
                     xSemaphoreGive(my_player.lock);
                     createColision(my_monster[i][j].x + my_monster[i][j].width / 2, 
                                             my_monster[i][j].y + my_monster[i][j].height / 2, MONSTER_COLISION);
@@ -801,6 +808,7 @@ void vCheckBulletColision(void)
             createColision(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y + my_spaceship.height / 2, MONSTER_COLISION);
             vSemaphoreDelete(my_bullet[k]->lock);
             free(my_bullet[k]);
+            vResetSpaceship();
             goto colision_detected;
         }
 
@@ -835,7 +843,16 @@ void vCheckMonstersDead(void)
 
 void vCheckPlayerDead(void)
 {
-
+    if (!my_player.n_lives) {
+        xSemaphoreTake(my_player.lock, portMAX_DELAY);
+        my_player.n_lives = 3;
+        if (my_player.score1 > my_player.highscore) {
+            my_player.highscore = my_player.score1;
+        }
+        my_player.score1 = 0;
+        vResetMonsters();
+        xSemaphoreGive(my_player.lock);
+    }
 }
 
 void vGameLogic(void *pvParameters)
