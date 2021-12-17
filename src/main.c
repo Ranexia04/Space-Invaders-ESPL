@@ -131,7 +131,6 @@ typedef struct bullet {
 
     callback_t callback; /**< bullet callback */
     void *args; /**< bullet callback args */
-    SemaphoreHandle_t lock;
 } bullet_t;
 
 typedef struct colision {
@@ -147,7 +146,6 @@ typedef struct colision {
 
     callback_t callback; /**< Collision callback */
     void *args; /**< Collision callback args */
-    SemaphoreHandle_t lock;
 } colision_t;
 
 typedef struct monster {
@@ -731,16 +729,14 @@ void vMenuDrawer(void *pvParameters)
 void vUpdateBulletPosition(void)
 {
     int i = 0, n_bullets;
-    bullet_t *my_bullet[10];
+    bullet_t my_bullet[10];
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
-        xSemaphoreTake(my_bullet[i]->lock, portMAX_DELAY);
-        if (my_bullet[i]->type == SPACESHIP_BULLET)
-            my_bullet[i]->y = my_bullet[i]->y - 5;
-        if (my_bullet[i]->type == MONSTER_BULLET || my_bullet[i]->type == MOTHERGUNSHIP_BULLET)
-            my_bullet[i]->y = my_bullet[i]->y + 5;
-        xSemaphoreGive(my_bullet[i]->lock);
+        if (my_bullet[i].type == SPACESHIP_BULLET)
+            my_bullet[i].y = my_bullet[i].y - 5;
+        if (my_bullet[i].type == MONSTER_BULLET || my_bullet[i].type == MOTHERGUNSHIP_BULLET)
+            my_bullet[i].y = my_bullet[i].y + 5;
         i++;
     }
 
@@ -752,20 +748,14 @@ void vUpdateBulletPosition(void)
 
 void vShootBullet(int initial_x, int initial_y, int type)
 {
-    bullet_t *my_bullet = calloc(1, sizeof(bullet_t));
+    bullet_t my_bullet;
 
-     if (!my_bullet) {
-        fprintf(stderr, "Creating bullet failed\n");
-        exit(EXIT_FAILURE);
-    }
-
-    my_bullet->x = initial_x;
-    my_bullet->y = initial_y;
-    my_bullet->width = 1;
-    my_bullet->height = BULLET_HEIGHT;
-    my_bullet->type = type;
-    my_bullet->colour = White;
-    my_bullet->lock = xSemaphoreCreateMutex();
+    my_bullet.x = initial_x;
+    my_bullet.y = initial_y;
+    my_bullet.width = 1;
+    my_bullet.height = BULLET_HEIGHT;
+    my_bullet.type = type;
+    my_bullet.colour = White;
 
     xQueueSend(BulletQueue, &my_bullet, portMAX_DELAY);
 }
@@ -775,24 +765,19 @@ void vShootBullet(int initial_x, int initial_y, int type)
 
 void createColision(int bullet_x, int bullet_y, int colision_type)
 {
-    colision_t *my_colision = calloc(1, sizeof(colision_t));
+    colision_t my_colision;
 
-    if (!my_colision) {
-        fprintf(stderr, "Creating colision failed\n");
-        exit(EXIT_FAILURE);
-    }
     if (colision_type == TOP_COLISION) {
-        my_colision->image = tumDrawLoadImage("colision.png");
+        my_colision.image = tumDrawLoadImage("colision.png");
     }
     if (colision_type == MONSTER_COLISION) {
-        my_colision->image = tumDrawLoadImage("colision2.png");
+        my_colision.image = tumDrawLoadImage("colision2.png");
     }
-    my_colision->width = tumDrawGetLoadedImageWidth(my_colision->image);
-    my_colision->height = tumDrawGetLoadedImageHeight(my_colision->image);
-    my_colision->x = bullet_x - my_colision->width / 2;
-    my_colision->y = bullet_y - my_colision->height / 2;
-    my_colision->frame_number = 0;
-    my_colision->lock = xSemaphoreCreateMutex();
+    my_colision.width = tumDrawGetLoadedImageWidth(my_colision.image);
+    my_colision.height = tumDrawGetLoadedImageHeight(my_colision.image);
+    my_colision.x = bullet_x - my_colision.width / 2;
+    my_colision.y = bullet_y - my_colision.height / 2;
+    my_colision.frame_number = 0;
 
     xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
 }
@@ -800,24 +785,22 @@ void createColision(int bullet_x, int bullet_y, int colision_type)
 void vCheckBulletColision(void)
 {
     int k = 0, i, j, n_bullets;
-    bullet_t *my_bullet[10];
+    bullet_t my_bullet[10];
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &my_bullet[k], portMAX_DELAY);
-        if (my_bullet[k]->y <= TOP_LINE_Y && my_bullet[k]->type == SPACESHIP_BULLET) {//bullet exceeded top limit
-            createColision(my_bullet[k]->x, my_bullet[k]->y, TOP_COLISION);
-            vSemaphoreDelete(my_bullet[k]->lock);
-            free(my_bullet[k]);
+        if (my_bullet[k].y <= TOP_LINE_Y && my_bullet[k].type == SPACESHIP_BULLET) {//bullet exceeded top limit
+            createColision(my_bullet[k].x, my_bullet[k].y, TOP_COLISION);
             goto colision_detected;
         }
 
         for (i = 0; i < N_ROWS; i++) {
             for (j = 0; j < N_COLUMNS; j++) {
-                if (my_bullet[k]->y - BULLET_HEIGHT >= my_monster[i][j].y
-                            && my_bullet[k]->y <= my_monster[i][j].y + my_monster[i][j].height
-                            && my_bullet[k]->x >= my_monster[i][j].x
-                            && my_bullet[k]->x <= my_monster[i][j].x + my_monster[i][j].width
-                            && my_monster[i][j].alive == 1 && my_bullet[k]->type == SPACESHIP_BULLET) {
+                if (my_bullet[k].y - BULLET_HEIGHT >= my_monster[i][j].y
+                            && my_bullet[k].y <= my_monster[i][j].y + my_monster[i][j].height
+                            && my_bullet[k].x >= my_monster[i][j].x
+                            && my_bullet[k].x <= my_monster[i][j].x + my_monster[i][j].width
+                            && my_monster[i][j].alive == 1 && my_bullet[k].type == SPACESHIP_BULLET) {
                     xSemaphoreTake(my_player.lock, portMAX_DELAY);//TALVEZ FAZER FUNÇÃO QUE DEIA REPLACE NESTE BLOCO PARA FICAR MAIS FACIL DE LER
                     if (my_monster[i][j].type == 0)
                         my_player.score1 = my_player.score1 + 30;
@@ -831,42 +814,36 @@ void vCheckBulletColision(void)
                     xSemaphoreTake(my_monster[i][j].lock, portMAX_DELAY);
                     my_monster[i][j].alive = 0;
                     xSemaphoreGive(my_monster[i][j].lock);
-                    vSemaphoreDelete(my_bullet[k]->lock);
-                    free(my_bullet[k]);
                     goto colision_detected;
                 }
             }
         }
 
-        if (my_bullet[k]->y + BULLET_HEIGHT >= GREEN_LINE_Y 
-                            && (my_bullet[k]->type == MONSTER_BULLET || my_bullet[k]->type == MOTHERGUNSHIP_BULLET)) {
-            createColision(my_bullet[k]->x, my_bullet[k]->y + BULLET_HEIGHT, TOP_COLISION);
-            vSemaphoreDelete(my_bullet[k]->lock);
-            free(my_bullet[k]);
+        if (my_bullet[k].y + BULLET_HEIGHT >= GREEN_LINE_Y 
+                            && (my_bullet[k].type == MONSTER_BULLET || my_bullet[k].type == MOTHERGUNSHIP_BULLET)) {
+            createColision(my_bullet[k].x, my_bullet[k].y + BULLET_HEIGHT, TOP_COLISION);
             goto colision_detected;
         }
 
-        if (my_bullet[k]->y + BULLET_HEIGHT >= my_spaceship.y
-                            && my_bullet[k]->y <= my_spaceship.y + my_spaceship.height
-                            && my_bullet[k]->x >= my_spaceship.x
-                            && my_bullet[k]->x <= my_spaceship.x + my_spaceship.width
-                            && (my_bullet[k]->type == MONSTER_BULLET || my_bullet[k]->type == MOTHERGUNSHIP_BULLET)) {
+        if (my_bullet[k].y + BULLET_HEIGHT >= my_spaceship.y
+                            && my_bullet[k].y <= my_spaceship.y + my_spaceship.height
+                            && my_bullet[k].x >= my_spaceship.x
+                            && my_bullet[k].x <= my_spaceship.x + my_spaceship.width
+                            && (my_bullet[k].type == MONSTER_BULLET || my_bullet[k].type == MOTHERGUNSHIP_BULLET)) {
             xSemaphoreTake(my_player.lock, portMAX_DELAY);
             my_player.n_lives--;
             xSemaphoreGive(my_player.lock);
             createColision(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y + my_spaceship.height / 2, MONSTER_COLISION);
-            vSemaphoreDelete(my_bullet[k]->lock);
-            free(my_bullet[k]);
             vResetSpaceship();
             goto colision_detected;
         }
 
-        if (my_bullet[k]->y - BULLET_HEIGHT >= my_mothergunship.y
-                            && my_bullet[k]->y <= my_mothergunship.y + my_mothergunship.height
-                            && my_bullet[k]->x >= my_mothergunship.x
-                            && my_bullet[k]->x <= my_mothergunship.x + my_mothergunship.width
+        if (my_bullet[k].y - BULLET_HEIGHT >= my_mothergunship.y
+                            && my_bullet[k].y <= my_mothergunship.y + my_mothergunship.height
+                            && my_bullet[k].x >= my_mothergunship.x
+                            && my_bullet[k].x <= my_mothergunship.x + my_mothergunship.width
                             && my_mothergunship.alive == 1 
-                            && my_bullet[k]->type == SPACESHIP_BULLET) {
+                            && my_bullet[k].type == SPACESHIP_BULLET) {
             xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
             my_mothergunship.alive = 0;
             xSemaphoreGive(my_mothergunship.lock);
@@ -874,8 +851,6 @@ void vCheckBulletColision(void)
             my_player.score1 = my_player.score1 + 50;
             xSemaphoreGive(my_player.lock);
             createColision(my_mothergunship.x + my_mothergunship.width / 2, my_mothergunship.y + my_mothergunship.height / 2, MONSTER_COLISION);
-            vSemaphoreDelete(my_bullet[k]->lock);
-            free(my_bullet[k]);
             goto colision_detected;
         }
 
@@ -964,11 +939,11 @@ void vGameLogic(void *pvParameters)
 void vDrawBullets(void)
 {
     int i = 0, n_bullets;
-    bullet_t *my_bullet[1000];
+    bullet_t my_bullet[10];
 
     while(uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
-        checkDraw(tumDrawFilledBox(my_bullet[i]->x, my_bullet[i]->y, my_bullet[i]->width, my_bullet[i]->height, my_bullet[i]->colour), __FUNCTION__);
+        checkDraw(tumDrawFilledBox(my_bullet[i].x, my_bullet[i].y, my_bullet[i].width, my_bullet[i].height, my_bullet[i].colour), __FUNCTION__);
         i++;
     }
 
@@ -981,17 +956,13 @@ void vDrawBullets(void)
 void vDrawColisions(void)
 {
     int i = 0, n_colisions;
-    colision_t *my_colision[10];
+    colision_t my_colision[10];
 
     while(uxQueueMessagesWaiting(ColisionQueue)) {
         xQueueReceive(ColisionQueue, &my_colision[i], portMAX_DELAY);
-        checkDraw(tumDrawLoadedImage(my_colision[i]->image, my_colision[i]->x, my_colision[i]->y), __FUNCTION__);
-        xSemaphoreTake(my_colision[i]->lock, portMAX_DELAY);
-        my_colision[i]->frame_number++;
-        xSemaphoreGive(my_colision[i]->lock);
-        if (my_colision[i]->frame_number > 20) {
-            vSemaphoreDelete(my_colision[i]->lock);
-            free(my_colision[i]);
+        checkDraw(tumDrawLoadedImage(my_colision[i].image, my_colision[i].x, my_colision[i].y), __FUNCTION__);
+        my_colision[i].frame_number++;
+        if (my_colision[i].frame_number > 20) {
             i--;
         }
         i++;
@@ -1157,14 +1128,14 @@ int main(int argc, char *argv[])
 	}
 
     BulletQueue =
-		xQueueCreate(10, sizeof(bullet_t*));
+		xQueueCreate(10, sizeof(bullet_t));
 	if (!BulletQueue) {
 		PRINT_ERROR("Could not open bullet queue");
 		goto err_bullet_queue;
 	}
 
     ColisionQueue =
-		xQueueCreate(10, sizeof(colision_t*));
+		xQueueCreate(10, sizeof(colision_t));
 	if (!ColisionQueue) {
 		PRINT_ERROR("Could not open colision queue");
 		goto err_colision_queue;
