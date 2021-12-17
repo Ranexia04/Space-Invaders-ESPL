@@ -162,14 +162,18 @@ typedef struct monster {
 
     callback_t callback; /**< monster callback */
     void *args; /**< monster callback args */
-    SemaphoreHandle_t lock;
 } monster_t;
 
-static monster_t my_monster[N_ROWS][N_COLUMNS] = { 0 };
+typedef struct monster_grid {
+    monster_t monster[N_ROWS][N_COLUMNS];
+    SemaphoreHandle_t lock;
+} monster_grid_t;
+
+static monster_grid_t my_monsters = { 0 };
 
 typedef struct player {
-    int score1; /**< X pixel coord of monster on screen */
-    int highscore; /**< Y pixel coord of monster on screen */
+    int score1;
+    int highscore;
     int score2;
     int n_lives;
     int credits;
@@ -218,15 +222,15 @@ void vResetMonsters(void)
     h_spacing = tumDrawGetLoadedImageWidth(monster_image[2]);
     v_spacing = tumDrawGetLoadedImageHeight(monster_image[2]);
 
+    xSemaphoreTake(my_monsters.lock, portMAX_DELAY);
     for (i = 0; i < N_ROWS; i++) {
         for (j = 0; j < N_COLUMNS; j++) {
-            xSemaphoreTake(my_monster[i][j].lock, portMAX_DELAY);
-            my_monster[i][j].x = 15 + h_spacing * 1.5 * j;
-            my_monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
-            my_monster[i][j].alive = 1;
-            xSemaphoreGive(my_monster[i][j].lock);
+            my_monsters.monster[i][j].x = 15 + h_spacing * 1.5 * j;
+            my_monsters.monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
+            my_monsters.monster[i][j].alive = 1;
         }
     }
+    xSemaphoreGive(my_monsters.lock);
 }
 
 void vInitMonsters(void)
@@ -239,25 +243,26 @@ void vInitMonsters(void)
     for (i = 0; i < N_ROWS; i++) {
         for (j = 0; j < N_COLUMNS; j++) {
             if (i == 0) {
-                my_monster[i][j].type = 0;
-                my_monster[i][j].image = monster_image[0];
+                my_monsters.monster[i][j].type = 0;
+                my_monsters.monster[i][j].image = monster_image[0];
             }
             if (i == 1 || i == 2) {
-                my_monster[i][j].type = 1;
-                my_monster[i][j].image = monster_image[1];
+                my_monsters.monster[i][j].type = 1;
+                my_monsters.monster[i][j].image = monster_image[1];
             }
             if (i == 3 || i == 4) {
-                my_monster[i][j].type = 2;
-                my_monster[i][j].image = monster_image[2];
+                my_monsters.monster[i][j].type = 2;
+                my_monsters.monster[i][j].image = monster_image[2];
             }
-            my_monster[i][j].width = tumDrawGetLoadedImageWidth(my_monster[i][j].image);
-            my_monster[i][j].height = tumDrawGetLoadedImageHeight(my_monster[i][j].image);
-            my_monster[i][j].x = 15 + h_spacing * 1.5 * j;
-            my_monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
-            my_monster[i][j].alive = 1;
-            my_monster[i][j].lock = xSemaphoreCreateMutex();
+            my_monsters.monster[i][j].width = tumDrawGetLoadedImageWidth(my_monsters.monster[i][j].image);
+            my_monsters.monster[i][j].height = tumDrawGetLoadedImageHeight(my_monsters.monster[i][j].image);
+            my_monsters.monster[i][j].x = 15 + h_spacing * 1.5 * j;
+            my_monsters.monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
+            my_monsters.monster[i][j].alive = 1;
         }
     }
+
+    my_monsters.lock = xSemaphoreCreateMutex();
 }
 
 void vInitPlayer(void)
@@ -527,6 +532,7 @@ void basicSequentialStateMachine(void *pvParameters)
 			vTaskSuspender();
 			switch (current_state) {
 			case MENU:
+                xTimerStop(xMothergunshipTimer, portMAX_DELAY);
 				if (MenuDrawer) {
 					vTaskResume(MenuDrawer);
 				}
@@ -794,30 +800,32 @@ void vCheckBulletColision(void)
             goto colision_detected;
         }
 
+
         for (i = 0; i < N_ROWS; i++) {
             for (j = 0; j < N_COLUMNS; j++) {
-                if (my_bullet[k].y - BULLET_HEIGHT >= my_monster[i][j].y
-                            && my_bullet[k].y <= my_monster[i][j].y + my_monster[i][j].height
-                            && my_bullet[k].x >= my_monster[i][j].x
-                            && my_bullet[k].x <= my_monster[i][j].x + my_monster[i][j].width
-                            && my_monster[i][j].alive == 1 && my_bullet[k].type == SPACESHIP_BULLET) {
+                if (my_bullet[k].y - BULLET_HEIGHT >= my_monsters.monster[i][j].y
+                            && my_bullet[k].y <= my_monsters.monster[i][j].y + my_monsters.monster[i][j].height
+                            && my_bullet[k].x >= my_monsters.monster[i][j].x
+                            && my_bullet[k].x <= my_monsters.monster[i][j].x + my_monsters.monster[i][j].width
+                            && my_monsters.monster[i][j].alive == 1 && my_bullet[k].type == SPACESHIP_BULLET) {
                     xSemaphoreTake(my_player.lock, portMAX_DELAY);//TALVEZ FAZER FUNÇÃO QUE DEIA REPLACE NESTE BLOCO PARA FICAR MAIS FACIL DE LER
-                    if (my_monster[i][j].type == 0)
+                    if (my_monsters.monster[i][j].type == 0)
                         my_player.score1 = my_player.score1 + 30;
-                    if (my_monster[i][j].type == 1)
+                    if (my_monsters.monster[i][j].type == 1)
                         my_player.score1 = my_player.score1 + 20;
-                    if (my_monster[i][j].type == 2)
+                    if (my_monsters.monster[i][j].type == 2)
                         my_player.score1 = my_player.score1 + 10;
                     xSemaphoreGive(my_player.lock);
-                    createColision(my_monster[i][j].x + my_monster[i][j].width / 2, 
-                                            my_monster[i][j].y + my_monster[i][j].height / 2, MONSTER_COLISION);
-                    xSemaphoreTake(my_monster[i][j].lock, portMAX_DELAY);
-                    my_monster[i][j].alive = 0;
-                    xSemaphoreGive(my_monster[i][j].lock);
+                    createColision(my_monsters.monster[i][j].x + my_monsters.monster[i][j].width / 2, 
+                                            my_monsters.monster[i][j].y + my_monsters.monster[i][j].height / 2, MONSTER_COLISION);
+                    xSemaphoreTake(my_monsters.lock, portMAX_DELAY);
+                    my_monsters.monster[i][j].alive = 0;
+                    xSemaphoreGive(my_monsters.lock);
                     goto colision_detected;
                 }
             }
         }
+
 
         if (my_bullet[k].y + BULLET_HEIGHT >= GREEN_LINE_Y 
                             && (my_bullet[k].type == MONSTER_BULLET || my_bullet[k].type == MOTHERGUNSHIP_BULLET)) {
@@ -874,7 +882,7 @@ void vCheckMonstersDead(void)
 
     for (i = 0; i < N_ROWS; i++) {
         for (j = 0; j < N_COLUMNS; j++) {
-            if (my_monster[i][j].alive)
+            if (my_monsters.monster[i][j].alive)
                 n_monster_alive++;
         }
     }
@@ -980,8 +988,8 @@ void vDrawMonsters(void)
 
     for (i = 0; i < N_ROWS; i++) {
         for (j = 0; j < N_COLUMNS; j++) {
-            if (my_monster[i][j].alive)
-                checkDraw(tumDrawLoadedImage(my_monster[i][j].image, my_monster[i][j].x, my_monster[i][j].y), __FUNCTION__);
+            if (my_monsters.monster[i][j].alive)
+                checkDraw(tumDrawLoadedImage(my_monsters.monster[i][j].image, my_monsters.monster[i][j].x, my_monsters.monster[i][j].y), __FUNCTION__);
         }
     }
 }
@@ -1030,7 +1038,7 @@ void vMonsterBulletShooter(void *pvParameters) {
         shooter_column = rand() % N_COLUMNS;
         
         for (i = N_ROWS - 1; i >= 0; i--) {
-            if (my_monster[i][shooter_column].alive) {
+            if (my_monsters.monster[i][shooter_column].alive) {
                 shooter_row = i;
                 break;
             }
@@ -1038,8 +1046,8 @@ void vMonsterBulletShooter(void *pvParameters) {
         if (i == -1)
             continue;
 
-        vShootBullet(my_monster[shooter_row][shooter_column].x + my_monster[shooter_row][shooter_column].width / 2,
-                     my_monster[shooter_row][shooter_column].y + my_monster[shooter_row][shooter_column].height, MONSTER_BULLET);
+        vShootBullet(my_monsters.monster[shooter_row][shooter_column].x + my_monsters.monster[shooter_row][shooter_column].width / 2,
+                     my_monsters.monster[shooter_row][shooter_column].y + my_monsters.monster[shooter_row][shooter_column].height, MONSTER_BULLET);
         vTaskDelayUntil(&xLastShot, pdMS_TO_TICKS(2500));
     }
 }
