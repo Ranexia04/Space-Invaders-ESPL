@@ -213,6 +213,7 @@ void vInitSpaceship(void)
     my_spaceship.height = tumDrawGetLoadedImageHeight(my_spaceship.image);
     my_spaceship.x = SCREEN_WIDTH / 2 - my_spaceship.width / 2;
     my_spaceship.y = SPACESHIP_Y;
+    my_spaceship.lock = xSemaphoreCreateMutex();
 }
 
 void vResetMonsters(void)
@@ -304,6 +305,20 @@ void vInitMothergunship(void)
     my_mothergunship.alive = 0;
     my_mothergunship.direction = RIGHT_TO_LEFT;
     my_mothergunship.lock = xSemaphoreCreateMutex();
+}
+
+void vResetQueues(void)
+{
+    bullet_t bullet;
+    colision_t colision;
+
+    while (uxQueueMessagesWaiting(BulletQueue)) {
+        xQueueReceive(BulletQueue, &bullet, portMAX_DELAY);
+    }
+
+    while (uxQueueMessagesWaiting(ColisionQueue)) {
+        xQueueReceive(ColisionQueue, &colision, portMAX_DELAY);
+    }
 }
 
 void checkDraw(unsigned char status, const char *msg)
@@ -887,20 +902,42 @@ void vCheckMonstersDead(void)
         }
     }
 
-    if (!n_monster_alive)
+    if (!n_monster_alive) {
+        vTaskSuspend(GameDrawer);
+        vTaskSuspend(MonsterBulletShooter);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskResume(GameDrawer);
+        vTaskResume(MonsterBulletShooter);
+        xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
+        my_mothergunship.alive = 0;
+        xSemaphoreGive(my_mothergunship.lock);
         vResetMonsters();
+        vResetSpaceship();
+        vResetQueues();
+        xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+    }
 }
 
 void vCheckPlayerDead(void)
 {
     if (!my_player.n_lives) {
+        vTaskSuspend(GameDrawer);
+        vTaskSuspend(MonsterBulletShooter);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskResume(GameDrawer);
+        vTaskResume(MonsterBulletShooter);
         xSemaphoreTake(my_player.lock, portMAX_DELAY);
         my_player.n_lives = 3;
         if (my_player.score1 > my_player.highscore) {
             my_player.highscore = my_player.score1;
         }
         my_player.score1 = 0;
+        xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
+        my_mothergunship.alive = 0;
+        xSemaphoreGive(my_mothergunship.lock);
         vResetMonsters();
+        vResetSpaceship();
+        vResetQueues();
         xTimerReset(xMothergunshipTimer, portMAX_DELAY);
         vInitMothergunship();
         xSemaphoreGive(my_player.lock);
@@ -933,13 +970,13 @@ void vGameLogic(void *pvParameters)
         vUpdateBulletPosition();
         vUpdateMothergunshipPosition();
         vCheckBulletColision();
-        vCheckMonstersDead();
-        vCheckPlayerDead();
         if (tumEventGetMouseLeft() == 1 && xTaskGetTickCount() - last_shot >
             SHOOT_DEBOUNCE_DELAY) {
             vShootBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y, SPACESHIP_BULLET);
             last_shot = xTaskGetTickCount();
         }
+        vCheckMonstersDead();
+        vCheckPlayerDead();
         vTaskDelay(pdMS_TO_TICKS(10));
 	}
 }
@@ -1031,7 +1068,6 @@ void vGameDrawer(void *pvParameters)
 }
 
 void vMonsterBulletShooter(void *pvParameters) {
-    TickType_t xLastShot = xTaskGetTickCount();
     int shooter_column, shooter_row, i;
 
     while (1) {
@@ -1048,7 +1084,7 @@ void vMonsterBulletShooter(void *pvParameters) {
 
         vShootBullet(my_monsters.monster[shooter_row][shooter_column].x + my_monsters.monster[shooter_row][shooter_column].width / 2,
                      my_monsters.monster[shooter_row][shooter_column].y + my_monsters.monster[shooter_row][shooter_column].height, MONSTER_BULLET);
-        vTaskDelayUntil(&xLastShot, pdMS_TO_TICKS(2500));
+        vTaskDelay(pdMS_TO_TICKS(2500));
     }
 }
 
@@ -1112,12 +1148,6 @@ int main(int argc, char *argv[])
 	if (!ScreenLock) {
 		PRINT_ERROR("Failed to create screen lock");
 		goto err_screen_lock;
-	}
-
-    my_spaceship.lock = xSemaphoreCreateMutex();
-    if (!my_spaceship.lock) {
-		PRINT_ERROR("Failed to create spaceship lock");
-		goto err_spaceship_lock;
 	}
 
 	//Queues
@@ -1237,8 +1267,6 @@ err_bullet_queue:
 err_current_state_queue:
 	vQueueDelete(StateChangeQueue);
 err_state_change_queue:
-    vSemaphoreDelete(my_spaceship.lock);
-err_spaceship_lock:
 	vSemaphoreDelete(ScreenLock);
 err_screen_lock:
 	vSemaphoreDelete(DrawSignal);
