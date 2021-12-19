@@ -28,10 +28,11 @@
 
 #define UNITARY_QUEUE_LENGHT 1
 
-#define STATE_COUNT 2
+#define STATE_COUNT 3
 
 #define MENU 0
 #define GAME 1
+#define PAUSE 2
 
 #define NEXT_TASK 0
 #define PREV_TASK 1
@@ -75,6 +76,8 @@ static TaskHandle_t BufferSwap = NULL;
 static TaskHandle_t MenuDrawer = NULL;
 static TaskHandle_t GameLogic = NULL;
 static TaskHandle_t GameDrawer = NULL;
+static TaskHandle_t PauseDrawer = NULL;
+
 static TaskHandle_t MonsterBulletShooter = NULL;
 
 static TimerHandle_t xMothergunshipTimer;
@@ -444,15 +447,51 @@ void xGetButtonInput(void)
 	}
 }
 
+static int vCheckPauseInput(void)
+{
+    unsigned char current_state;
+
+	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+		if (buttons.buttons[KEYCODE(P)]) {
+			buttons.buttons[KEYCODE(P)] = 0;
+			if (StateChangeQueue) {
+				xSemaphoreGive(buttons.lock);
+                if (xQueuePeek(CurrentStateQueue, &current_state, 0) ==
+			    pdTRUE) {
+                    if (current_state == GAME) {
+                        xQueueSend(StateChangeQueue, &next_state_signal, 0);
+                    } else if (current_state == PAUSE) {
+                        xQueueSend(StateChangeQueue, &prev_state_signal, 0);
+                    }
+				}
+				return 0;
+			}
+			xSemaphoreGive(buttons.lock);
+			return -1;
+		}
+		xSemaphoreGive(buttons.lock);
+	}
+
+	return 0;
+}
+
 static int vCheckStateInput(void)
 {
+    unsigned char current_state;
+
 	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
 		if (buttons.buttons[KEYCODE(M)]) {
 			buttons.buttons[KEYCODE(M)] = 0;
 			if (StateChangeQueue) {
 				xSemaphoreGive(buttons.lock);
-				xQueueSend(StateChangeQueue, &next_state_signal,
-					   0);
+                if (xQueuePeek(CurrentStateQueue, &current_state, 0) ==
+			    pdTRUE) {
+                    if (current_state == MENU) {
+                        xQueueSend(StateChangeQueue, &next_state_signal, 0);
+                    } else if (current_state == GAME) {
+                        xQueueSend(StateChangeQueue, &prev_state_signal, 0);
+                    }
+				}
 				return 0;
 			}
 			xSemaphoreGive(buttons.lock);
@@ -585,6 +624,9 @@ void vTaskSuspender()
     if (MonsterBulletShooter) {
 		vTaskSuspend(MonsterBulletShooter);
     }
+    if (PauseDrawer) {
+		vTaskSuspend(PauseDrawer);
+    }
 }
 
 void basicSequentialStateMachine(void *pvParameters)
@@ -642,6 +684,12 @@ void basicSequentialStateMachine(void *pvParameters)
 					vTaskResume(MonsterBulletShooter);
                 }
 				break;
+            case PAUSE:
+                xTimerStop(xMothergunshipTimer, portMAX_DELAY);
+                if (MonsterBulletShooter) {
+					vTaskResume(PauseDrawer);
+                }
+                break;
 			default:
 				break;
 			}
@@ -755,23 +803,18 @@ void vMoveSpaceshipRight(void)
 
 int vCheckButtonInput(int key)
 {
-	unsigned char current_state;
-
 	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
 		if (buttons.buttons[key]) {
 			xSemaphoreGive(buttons.lock);
-			if (xQueuePeek(CurrentStateQueue, &current_state, 0) ==
-			    pdTRUE) {
-				switch (key) {
-				    case KEYCODE(A):
-                        vMoveSpaceshipLeft();
-					    break;
-				    case KEYCODE(D):
-                        vMoveSpaceshipRight();
-					    break;
-				    default:
-					    break;
-				}
+			switch (key) {
+				case KEYCODE(A):
+                    vMoveSpaceshipLeft();
+					break;
+				case KEYCODE(D):
+                    vMoveSpaceshipRight();
+					break;
+				default:
+					 break;
 			}
 			return 0;
 		}
@@ -1074,6 +1117,7 @@ void vGameLogic(void *pvParameters)
         }
         vCheckMonstersDead();
         vCheckPlayerDead();
+        vCheckPauseInput();
         vTaskDelay(pdMS_TO_TICKS(10));
 	}
 }
@@ -1203,6 +1247,23 @@ void vMonsterBulletShooter(void *pvParameters) {
                      my_monsters.monster[shooter_row][shooter_column].y + my_monsters.monster[shooter_row][shooter_column].height, MONSTER_BULLET);
         vTaskDelay(pdMS_TO_TICKS(2500));
     }
+}
+
+void vPauseDrawer(void *pvParameters)
+{
+    prints("Pause init'd\n");
+
+	while (1) {
+		xSemaphoreTake(DrawSignal, portMAX_DELAY);
+        tumEventFetchEvents(FETCH_EVENT_BLOCK |
+				    FETCH_EVENT_NO_GL_CHECK);
+        xGetButtonInput();
+		xSemaphoreTake(ScreenLock, portMAX_DELAY);
+		checkDraw(tumDrawClear(BACKGROUND_COLOUR), __FUNCTION__);
+        vDrawText("PAUSED", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
+		xSemaphoreGive(ScreenLock);
+        vCheckPauseInput();
+	}
 }
 
 void vInitImages(void)
@@ -1346,7 +1407,7 @@ int main(int argc, char *argv[])
 		goto err_monster_bullet_shooter;
 	}
 
-	//Normal Tasks
+	//State Drawer Tasks
 	if (xTaskCreate(vMenuDrawer, "MenuDrawer", STACK_SIZE,
 			NULL, mainGENERIC_PRIORITY + 1,
 			&MenuDrawer) != pdPASS) {
@@ -1354,12 +1415,19 @@ int main(int argc, char *argv[])
 		goto err_MenuDrawer;
 	}
 
-	GameDrawer = xTaskCreateStatic(vGameDrawer, "Task2", STACK_SIZE, NULL,
+	GameDrawer = xTaskCreateStatic(vGameDrawer, "GameDrawer", STACK_SIZE, NULL,
 				       mainGENERIC_PRIORITY + 1, xStack,
 				       &GameDrawerBuffer);
 	if (GameDrawer == NULL) {
 		PRINT_TASK_ERROR("GameDrawer");
 		goto err_GameDrawer;
+	}
+
+    if (xTaskCreate(vPauseDrawer, "PauseDrawer", STACK_SIZE,
+			NULL, mainGENERIC_PRIORITY + 1,
+			&PauseDrawer) != pdPASS) {
+		PRINT_TASK_ERROR("PauseDrawer");
+		goto err_PauseDrawer;
 	}
 
     srand(1);
@@ -1376,6 +1444,8 @@ int main(int argc, char *argv[])
 
 	return EXIT_SUCCESS;
 
+	vTaskDelete(PauseDrawer);
+err_PauseDrawer:
 	vTaskDelete(GameDrawer);
 err_GameDrawer:
 	vTaskDelete(MenuDrawer);
