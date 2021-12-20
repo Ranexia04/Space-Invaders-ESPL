@@ -76,9 +76,9 @@ static TaskHandle_t BufferSwap = NULL;
 static TaskHandle_t MenuDrawer = NULL;
 static TaskHandle_t GameLogic = NULL;
 static TaskHandle_t GameDrawer = NULL;
-static TaskHandle_t PauseDrawer = NULL;
-
 static TaskHandle_t MonsterBulletShooter = NULL;
+static TaskHandle_t MonsterMover = NULL;
+static TaskHandle_t PauseDrawer = NULL;
 
 static TimerHandle_t xMothergunshipTimer;
 
@@ -624,6 +624,9 @@ void vTaskSuspender()
     if (MonsterBulletShooter) {
 		vTaskSuspend(MonsterBulletShooter);
     }
+    if (MonsterMover) {
+		vTaskSuspend(MonsterMover);
+    }
     if (PauseDrawer) {
 		vTaskSuspend(PauseDrawer);
     }
@@ -683,10 +686,13 @@ void basicSequentialStateMachine(void *pvParameters)
                 if (MonsterBulletShooter) {
 					vTaskResume(MonsterBulletShooter);
                 }
+                if (MonsterMover) {
+					vTaskResume(MonsterMover);
+                }
 				break;
             case PAUSE:
                 xTimerStop(xMothergunshipTimer, portMAX_DELAY);
-                if (MonsterBulletShooter) {
+                if (PauseDrawer) {
 					vTaskResume(PauseDrawer);
                 }
                 break;
@@ -1249,6 +1255,79 @@ void vMonsterBulletShooter(void *pvParameters) {
     }
 }
 
+int vComputeRightMostMonster(int i)
+{
+    int right_index = -1, j;
+
+    for (j = 0; j < N_COLUMNS; j++) {
+        if (my_monsters.monster[i][j].alive)
+            right_index = j;
+    }
+
+    return right_index;
+}
+
+int vComputeLeftMostMonster(int i)
+{
+    int left_index = -1, j;
+
+    for (j = N_COLUMNS - 1; j >= 0; j--) {
+        if (my_monsters.monster[i][j].alive)
+            left_index = j;
+    }
+
+    return left_index;
+}
+
+void vMonsterMoveCloser(void)
+{
+    int i, j;
+
+    if (xSemaphoreTake(my_monsters.lock, 0) == pdTRUE) {
+        for (i = 0; i < N_ROWS; i++) {
+            for (j = 0; j < N_COLUMNS; j++) {
+                my_monsters.monster[i][j].y = my_monsters.monster[i][j].y + 10;
+            }
+        }
+        xSemaphoreGive(my_monsters.lock);
+    }
+}
+
+void vUpdateDirection(int *direction)
+{
+    int right_index, left_index, i;
+
+    for (i = 0; i < N_ROWS; i++) {
+        right_index = vComputeRightMostMonster(i);
+        left_index = vComputeLeftMostMonster(i);
+        if (my_monsters.monster[i][left_index].x < 10 
+                            || my_monsters.monster[i][right_index].x 
+                            + my_monsters.monster[i][right_index].width > SCREEN_WIDTH - 10) {
+            (*direction) = -1 * (*direction);
+            vMonsterMoveCloser();
+            return;
+        }
+    }
+}
+
+void vMonsterMover(void *pvParameters)
+{
+    int i, j, direction = 1;
+
+    while (1) {
+        for (i = N_ROWS - 1 ; i >= 0; i--) {
+            for (j = 0; j < N_COLUMNS; j++) {
+                if (xSemaphoreTake(my_monsters.lock, 0) == pdTRUE) {
+                    my_monsters.monster[i][j].x = my_monsters.monster[i][j].x + direction * 5;
+                    xSemaphoreGive(my_monsters.lock);
+                }
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+        }
+        vUpdateDirection(&direction);
+    }
+}
+
 void vPauseDrawer(void *pvParameters)
 {
     prints("Pause init'd\n");
@@ -1407,6 +1486,12 @@ int main(int argc, char *argv[])
 		goto err_monster_bullet_shooter;
 	}
 
+    if (xTaskCreate(vMonsterMover, "MonsterMover", STACK_SIZE,
+			NULL, mainGENERIC_PRIORITY + 4, &MonsterMover) != pdPASS) {
+		PRINT_TASK_ERROR("MonsterMover");
+		goto err_monster_mover;
+	}
+
 	//State Drawer Tasks
 	if (xTaskCreate(vMenuDrawer, "MenuDrawer", STACK_SIZE,
 			NULL, mainGENERIC_PRIORITY + 1,
@@ -1450,6 +1535,8 @@ err_PauseDrawer:
 err_GameDrawer:
 	vTaskDelete(MenuDrawer);
 err_MenuDrawer:
+    vTaskDelete(MonsterMover);
+err_monster_mover:
     vTaskDelete(MonsterBulletShooter);
 err_monster_bullet_shooter:
 	vTaskDelete(GameLogic);
