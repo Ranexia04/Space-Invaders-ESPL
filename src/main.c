@@ -63,6 +63,7 @@
 #define MONSTER_BULLET 1
 #define MOTHERGUNSHIP_BULLET 2
 #define N_BUNKERS 4
+#define ORIGINAL_TIMER 10000
 
 #ifdef TRACE_FUNCTIONS
 #include "tracer.h"
@@ -89,6 +90,7 @@ static QueueHandle_t StateChangeQueue = NULL;
 static QueueHandle_t CurrentStateQueue = NULL;
 static QueueHandle_t BulletQueue = NULL;
 static QueueHandle_t ColisionQueue = NULL;
+static QueueHandle_t TimerStartingQueue = NULL;
 
 static SemaphoreHandle_t DrawSignal = NULL;
 static SemaphoreHandle_t ScreenLock = NULL;
@@ -310,6 +312,8 @@ void vInitPlayer(void)
 
 void vResetMothergunship(void)
 {
+    TickType_t timer_starting = xTaskGetTickCount();
+
     xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
     my_mothergunship.direction = !my_mothergunship.direction;
     if (my_mothergunship.direction == LEFT_TO_RIGHT)
@@ -318,6 +322,9 @@ void vResetMothergunship(void)
         my_mothergunship.x = SCREEN_WIDTH;
     my_mothergunship.alive = 1;
     xSemaphoreGive(my_mothergunship.lock);
+    xTimerChangePeriod(xMothergunshipTimer, ORIGINAL_TIMER, portMAX_DELAY);
+
+    xQueueOverwrite(TimerStartingQueue, &timer_starting);
 }
 
 void vMothergunshipTimerCallback(TimerHandle_t xMothergunshipTimer)
@@ -325,8 +332,17 @@ void vMothergunshipTimerCallback(TimerHandle_t xMothergunshipTimer)
     vResetMothergunship();
 }
 
+void vKillMothergunship(void)
+{
+    xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
+    my_mothergunship.alive = 0;
+    xSemaphoreGive(my_mothergunship.lock);
+}
+
 void vInitMothergunship(void)
 {
+    TickType_t timer_starting = xTaskGetTickCount();
+
     my_mothergunship.image = mothergunship_image;
     my_mothergunship.x = 0;
     my_mothergunship.y = MOTHERGUNSHIP_Y;
@@ -335,6 +351,8 @@ void vInitMothergunship(void)
     my_mothergunship.alive = 0;
     my_mothergunship.direction = RIGHT_TO_LEFT;
     my_mothergunship.lock = xSemaphoreCreateMutex();
+
+    xQueueOverwrite(TimerStartingQueue, &timer_starting);
 }
 
 void vResetBunkers(void)
@@ -401,6 +419,16 @@ void vResetQueues(void)
     while (uxQueueMessagesWaiting(ColisionQueue)) {
         xQueueReceive(ColisionQueue, &colision, portMAX_DELAY);
     }
+}
+
+void vResetGameBoard(void)
+{
+    vResetQueues();
+    vResetMonsters();
+    vResetSpaceship();
+    vResetBunkers();
+    vKillMothergunship();
+    xTimerReset(xMothergunshipTimer, portMAX_DELAY);
 }
 
 void checkDraw(unsigned char status, const char *msg)
@@ -636,13 +664,16 @@ void vTaskSuspender()
 void basicSequentialStateMachine(void *pvParameters)
 {
 	unsigned char current_state = STARTING_STATE; // Default state
+    unsigned char prev_state = STARTING_STATE;
 	unsigned char state_changed =
 		1; // Only re-evaluate state if it has changed
 	unsigned char input = 0;
 
 	const int state_change_period = STATE_DEBOUNCE_DELAY;
 
-	TickType_t last_change = xTaskGetTickCount();
+	TickType_t last_change, timer_elapsed, timer_starting;
+
+    last_change = xTaskGetTickCount();
 
     xQueueOverwrite(CurrentStateQueue,
 							&current_state);
@@ -658,6 +689,7 @@ void basicSequentialStateMachine(void *pvParameters)
 					  portMAX_DELAY) == pdTRUE)
 				if (xTaskGetTickCount() - last_change >
 				    state_change_period) {
+                    prev_state = current_state;
 					changeState(&current_state, input);
 					xQueueOverwrite(CurrentStateQueue,
 							&current_state);
@@ -671,13 +703,21 @@ void basicSequentialStateMachine(void *pvParameters)
 			vTaskSuspender();
 			switch (current_state) {
 			case MENU:
-                xTimerStop(xMothergunshipTimer, portMAX_DELAY);
+                if (prev_state == GAME) {
+                    vResetGameBoard();
+                    xTimerStop(xMothergunshipTimer, portMAX_DELAY);
+                }
 				if (MenuDrawer) {
 					vTaskResume(MenuDrawer);
 				}
 				break;
 			case GAME:
-                xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+                if (prev_state == MENU || prev_state == current_state) {
+                    xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+                }
+                if (prev_state == PAUSE) {
+                    xTimerChangePeriod(xMothergunshipTimer, ORIGINAL_TIMER - timer_elapsed, portMAX_DELAY);
+                }
 				if (GameDrawer) {
 					vTaskResume(GameDrawer);
 				}
@@ -692,7 +732,11 @@ void basicSequentialStateMachine(void *pvParameters)
                 }
 				break;
             case PAUSE:
-                xTimerStop(xMothergunshipTimer, portMAX_DELAY);
+                if (prev_state == GAME) {
+                    xTimerStop(xMothergunshipTimer, portMAX_DELAY);
+                    timer_starting = xQueuePeek(TimerStartingQueue, &timer_starting, portMAX_DELAY);
+                    timer_elapsed = xTaskGetTickCount() - timer_starting;
+                }
                 if (PauseDrawer) {
 					vTaskResume(PauseDrawer);
                 }
@@ -995,9 +1039,7 @@ void vCheckBulletColision(void)
                             && my_bullet[k].x <= my_mothergunship.x + my_mothergunship.width
                             && my_mothergunship.alive == 1 
                             && my_bullet[k].type == SPACESHIP_BULLET) {
-            xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
-            my_mothergunship.alive = 0;
-            xSemaphoreGive(my_mothergunship.lock);
+            vKillMothergunship();
             xSemaphoreTake(my_player.lock, portMAX_DELAY);
             my_player.score1 = my_player.score1 + 50 * (rand() % 4 + 1);
             xSemaphoreGive(my_player.lock);
@@ -1052,14 +1094,7 @@ void vCheckMonstersDead(void)
         vTaskSuspend(GameDrawer);
         vTaskSuspend(MonsterBulletShooter);
         vTaskDelay(pdMS_TO_TICKS(1000));
-        vResetQueues();
-        xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
-        my_mothergunship.alive = 0;
-        xSemaphoreGive(my_mothergunship.lock);
-        vResetMonsters();
-        vResetSpaceship();
-        vResetBunkers();
-        xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+        vResetGameBoard();
         vTaskResume(GameDrawer);
         vTaskResume(MonsterBulletShooter);
     }
@@ -1088,7 +1123,7 @@ void vCheckPlayerDead(void)
         vTaskSuspend(GameDrawer);
         vTaskSuspend(MonsterBulletShooter);
         vTaskDelay(pdMS_TO_TICKS(1000));
-        vResetQueues();
+        vResetGameBoard();
         xSemaphoreTake(my_player.lock, portMAX_DELAY);
         my_player.n_lives = 3;
         if (my_player.score1 > my_player.highscore) {
@@ -1096,13 +1131,6 @@ void vCheckPlayerDead(void)
         }
         my_player.score1 = 0;
         xSemaphoreGive(my_player.lock);
-        xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
-        my_mothergunship.alive = 0;
-        xSemaphoreGive(my_mothergunship.lock);
-        vResetMonsters();
-        vResetSpaceship();
-        vResetBunkers();
-        xTimerReset(xMothergunshipTimer, portMAX_DELAY);
         vTaskResume(GameDrawer);
         vTaskResume(MonsterBulletShooter);
     }
@@ -1117,11 +1145,18 @@ void vUpdateMothergunshipPosition(void)
         if (my_mothergunship.direction == RIGHT_TO_LEFT)
             my_mothergunship.x = my_mothergunship.x - 1;
         if (my_mothergunship.x > SCREEN_WIDTH) {
-            my_mothergunship.alive = 0;
-            xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+            xSemaphoreGive(my_mothergunship.lock);
+            goto reset_mothergunship;
         }
         xSemaphoreGive(my_mothergunship.lock);
     }
+
+    return;
+
+reset_mothergunship:
+    vResetMothergunship();
+    vKillMothergunship();
+    return;
 }
 
 int vSpaceshipBulletActive(void)
@@ -1146,18 +1181,14 @@ int vSpaceshipBulletActive(void)
 
 void vGameLogic(void *pvParameters)
 {
-    TickType_t last_shot = xTaskGetTickCount();
-
 	while (1) {
         xGetButtonInput();
         vCheckKeyboardInput();
         vUpdateBulletPosition();
         vUpdateMothergunshipPosition();
         vCheckBulletColision();
-        if (tumEventGetMouseLeft() == 1 && vSpaceshipBulletActive() == 0) {
+        if (tumEventGetMouseLeft() == 1 && vSpaceshipBulletActive() == 0)
             vShootBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y, SPACESHIP_BULLET);
-            last_shot = xTaskGetTickCount();
-        }
         vCheckMonstersDead();
         vCheckPlayerDead();
         vCheckPauseInput();
@@ -1499,8 +1530,15 @@ int main(int argc, char *argv[])
 		goto err_colision_queue;
 	}
 
+    TimerStartingQueue =
+		xQueueCreate(1, sizeof(TickType_t));
+	if (!TimerStartingQueue) {
+		PRINT_ERROR("Could not open timer value queue");
+		goto err_timer_starting_queue;
+	}
+
 	//Timers
-    xMothergunshipTimer = xTimerCreate("Mothergunship Timer", pdMS_TO_TICKS(10000), pdTRUE, (void *) 0, vMothergunshipTimerCallback);
+    xMothergunshipTimer = xTimerCreate("Mothergunship Timer", pdMS_TO_TICKS(ORIGINAL_TIMER), pdTRUE, (void *) 0, vMothergunshipTimerCallback);
     if (xMothergunshipTimer == NULL) {
         PRINT_ERROR("Could not open mothergunship timer");
         goto err_mothergunship_timer;
@@ -1595,6 +1633,8 @@ err_bufferswap:
 err_statemachine:
     xTimerDelete(xMothergunshipTimer, portMAX_DELAY);
 err_mothergunship_timer:
+    vQueueDelete(TimerStartingQueue);
+err_timer_starting_queue:
     vQueueDelete(ColisionQueue);
 err_colision_queue:
     vQueueDelete(BulletQueue);
