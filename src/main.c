@@ -1066,9 +1066,26 @@ void vCheckMonstersDead(void)
     }
 }
 
+int vCheckMonstersInvaded(void)
+{
+    int i, j;
+
+    for (i = N_ROWS - 1; i >= 0; i--) {
+        for (j = 0; j < N_COLUMNS; j++) {
+            if (my_monsters.monster[i][j].alive
+             && my_monsters.monster[i][j].y + my_monsters.monster[i][j].height
+              >= my_bunkers.bunker[1].component[0][0].y) {
+                  return 1;
+              }
+        }
+    }
+
+    return 0;
+}
+
 void vCheckPlayerDead(void)
 {
-    if (!my_player.n_lives) {
+    if (!my_player.n_lives || vCheckMonstersInvaded()) {
         vTaskSuspend(GameDrawer);
         vTaskSuspend(MonsterBulletShooter);
         vTaskDelay(pdMS_TO_TICKS(1000));
