@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
+#include <time.h>
 
 #include <SDL2/SDL_scancode.h>
 
@@ -9,7 +11,6 @@
 #include "task.h"
 #include "timers.h"
 #include "string.h"
-#include <math.h>
 
 #include "TUM_Ball.h"
 #include "TUM_Draw.h"
@@ -998,7 +999,7 @@ void vCheckBulletColision(void)
             my_mothergunship.alive = 0;
             xSemaphoreGive(my_mothergunship.lock);
             xSemaphoreTake(my_player.lock, portMAX_DELAY);
-            my_player.score1 = my_player.score1 + 50;
+            my_player.score1 = my_player.score1 + 50 * (rand() % 4 + 1);
             xSemaphoreGive(my_player.lock);
             createColision(my_mothergunship.x + my_mothergunship.width / 2, my_mothergunship.y + my_mothergunship.height / 2, colision_image[1]);
             goto colision_detected;
@@ -1515,7 +1516,7 @@ int main(int argc, char *argv[])
 		goto err_PauseDrawer;
 	}
 
-    srand(1);
+    srand(time(NULL));
 
     vInitImages();
     vInitPlayer();
