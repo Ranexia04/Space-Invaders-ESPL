@@ -41,7 +41,6 @@
 #define STARTING_STATE GAME
 
 #define STATE_DEBOUNCE_DELAY 300
-#define SHOOT_DEBOUNCE_DELAY 300
 
 #define NOT_CENTERING 0
 #define CENTERING 1
@@ -1125,6 +1124,26 @@ void vUpdateMothergunshipPosition(void)
     }
 }
 
+int vSpaceshipBulletActive(void)
+{
+    bullet_t my_bullet[10];
+    int bullet_active = 0, n_bullets, i = 0;
+
+    while(uxQueueMessagesWaiting(BulletQueue)) {
+        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
+        if (my_bullet[i].type == SPACESHIP_BULLET)
+            bullet_active = 1;
+        i++;
+    }
+
+    n_bullets = i;
+    for (i = 0; i < n_bullets; i++) {
+        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
+    }
+
+    return bullet_active;
+}
+
 void vGameLogic(void *pvParameters)
 {
     TickType_t last_shot = xTaskGetTickCount();
@@ -1135,8 +1154,7 @@ void vGameLogic(void *pvParameters)
         vUpdateBulletPosition();
         vUpdateMothergunshipPosition();
         vCheckBulletColision();
-        if (tumEventGetMouseLeft() == 1 && xTaskGetTickCount() - last_shot >
-            SHOOT_DEBOUNCE_DELAY) {
+        if (tumEventGetMouseLeft() == 1 && vSpaceshipBulletActive() == 0) {
             vShootBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y, SPACESHIP_BULLET);
             last_shot = xTaskGetTickCount();
         }
