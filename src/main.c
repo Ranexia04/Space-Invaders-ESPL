@@ -297,6 +297,19 @@ void vInitMonsters(void)
     my_monsters.lock = xSemaphoreCreateMutex();
 }
 
+void vResetPlayer(void)
+{
+    xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    if (my_player.score1 > my_player.highscore) {
+        my_player.highscore = my_player.score1;
+    }
+    my_player.score1 = 0;
+    my_player.score2 = 0;
+    my_player.n_lives = 3;
+    my_player.credits = 0;
+    xSemaphoreGive(my_player.lock);
+}
+
 void vInitPlayer(void)
 {
     my_player.score1 = 0;
@@ -705,6 +718,7 @@ void basicSequentialStateMachine(void *pvParameters)
 			case MENU:
                 if (prev_state == GAME) {
                     vResetGameBoard();
+                    vResetPlayer();
                     xTimerStop(xMothergunshipTimer, portMAX_DELAY);
                 }
 				if (MenuDrawer) {
@@ -898,6 +912,42 @@ void vDrawMenuText(void)
     vDrawCredit();
 }
 
+void vCheckCheatInput(int key)
+{
+    static int debounce_flags[3] = {0};
+
+    if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+		if (buttons.buttons[KEYCODE(1)]) {
+			if (!debounce_flags[0]) {
+                printf("1\n");
+                debounce_flags[0] = 1;
+            }
+		} else {
+            debounce_flags[0] = 0;
+        }
+
+        if (buttons.buttons[KEYCODE(2)]) {
+			if (!debounce_flags[1]) {
+                printf("2\n");
+                debounce_flags[1] = 1;
+            }
+		} else {
+            debounce_flags[1] = 0;
+        }
+
+        if (buttons.buttons[KEYCODE(3)]) {
+			if (!debounce_flags[2]) {
+                printf("3\n");
+                debounce_flags[2] = 1;
+            }
+		} else {
+            debounce_flags[2] = 0;
+        }
+
+		xSemaphoreGive(buttons.lock);
+	}
+}
+
 void vMenuDrawer(void *pvParameters)
 {
 	prints("Menu Init'd\n");
@@ -916,6 +966,9 @@ void vMenuDrawer(void *pvParameters)
 		xSemaphoreGive(ScreenLock);
 
 		vCheckKeyboardInput();
+        vCheckCheatInput(KEYCODE(1));
+        vCheckCheatInput(KEYCODE(2));
+        vCheckCheatInput(KEYCODE(3));
 	}
 }
 
@@ -1124,13 +1177,7 @@ void vCheckPlayerDead(void)
         vTaskSuspend(MonsterBulletShooter);
         vTaskDelay(pdMS_TO_TICKS(1000));
         vResetGameBoard();
-        xSemaphoreTake(my_player.lock, portMAX_DELAY);
-        my_player.n_lives = 3;
-        if (my_player.score1 > my_player.highscore) {
-            my_player.highscore = my_player.score1;
-        }
-        my_player.score1 = 0;
-        xSemaphoreGive(my_player.lock);
+        vResetPlayer();
         vTaskResume(GameDrawer);
         vTaskResume(MonsterBulletShooter);
     }
