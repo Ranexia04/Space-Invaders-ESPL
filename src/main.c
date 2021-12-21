@@ -299,6 +299,7 @@ void vInitMonsters(void)
 void vInitPlayer(void)
 {
     my_player.score1 = 0;
+    my_player.highscore = 0;
     my_player.score2 = 0;
     my_player.n_lives = 3;
     my_player.credits = 0;
@@ -1363,6 +1364,15 @@ void vInitImages(void)
     bunker_image[5] = tumDrawLoadImage("bunker6.png");
 }
 
+void vSaveHighScore(void)
+{
+    FILE *fp = NULL;
+
+    fp = fopen("highscore.txt", "w");
+    fprintf(fp, "Last session's highscore was %d.\n", my_player.highscore);
+    fclose(fp);
+}
+
 #define PRINT_TASK_ERROR(task) PRINT_ERROR("Failed to print task ##task");
 
 int main(int argc, char *argv[])
@@ -1517,6 +1527,8 @@ int main(int argc, char *argv[])
 	}
 
     srand(time(NULL));
+
+    atexit(vSaveHighScore);
 
     vInitImages();
     vInitPlayer();
