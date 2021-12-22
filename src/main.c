@@ -747,6 +747,7 @@ void basicSequentialStateMachine(void *pvParameters)
                     vResetGameBoard();
                     vResetPlayer();
                     xTimerStop(xMothergunshipTimer, portMAX_DELAY);
+                    prints("Match exited.\n");
                 }
 				if (MenuDrawer) {
 					vTaskResume(MenuDrawer);
@@ -755,9 +756,11 @@ void basicSequentialStateMachine(void *pvParameters)
 			case GAME:
                 if (prev_state == MENU || prev_state == current_state) {
                     xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+                    prints("Match started! Good luck and Have fun!\n");
                 }
                 if (prev_state == PAUSE) {
                     xTimerChangePeriod(xMothergunshipTimer, ORIGINAL_TIMER - timer_elapsed, portMAX_DELAY);
+                    prints("Game unpaused.\n");
                 }
 				if (GameDrawer) {
 					vTaskResume(GameDrawer);
@@ -774,6 +777,7 @@ void basicSequentialStateMachine(void *pvParameters)
 				break;
             case PAUSE:
                 if (prev_state == GAME) {
+                    prints("Game paused.\n");
                     xTimerStop(xMothergunshipTimer, portMAX_DELAY);
                     timer_starting = xQueuePeek(TimerStartingQueue, &timer_starting, portMAX_DELAY);
                     timer_elapsed = xTaskGetTickCount() - timer_starting;
@@ -939,15 +943,61 @@ void vDrawMenuText(void)
     vDrawCredit();
 }
 
-void vCheckCheatInput(int key)
+void vSetCheat1(void)
+{
+    xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    if (my_player.n_lives <= 3) {
+        my_player.n_lives = 9999;
+        prints("You now have infinite lifes!\n");
+        xSemaphoreGive(my_player.lock);
+        return;
+    }
+    if (my_player.n_lives > 3) {
+        my_player.n_lives = 3;
+        prints("You now have standard ammount of lives!\n");
+        xSemaphoreGive(my_player.lock);
+        return;
+    }
+    xSemaphoreGive(my_player.lock);
+    return;
+}
+
+void vSetCheat2(void)
+{
+    int score1;
+
+    prints("The score to be set is ");
+    scanf("%d", &score1);
+    prints("\n");
+    xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    my_player.score1 = score1;
+    xSemaphoreGive(my_player.lock);
+}
+
+void vSetCheat3(void)
+{
+    int monster_delay;
+
+    xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
+    monster_delay = monster_delay + 5;
+    if (monster_delay > ORIGINAL_MONSTER_DELAY + 20) {
+        monster_delay = ORIGINAL_MONSTER_DELAY;
+        prints("Monster speed reseted.\n");
+    } else {
+        prints("Monster speed decreased.\n");
+    }
+    xQueueOverwrite(MonsterDelayQueue, &monster_delay);
+}
+
+void vCheckCheatInput(void)
 {
     static int debounce_flags[3] = {0};
 
     if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
 		if (buttons.buttons[KEYCODE(1)]) {
 			if (!debounce_flags[0]) {
-                printf("1\n");
                 debounce_flags[0] = 1;
+                vSetCheat1();
             }
 		} else {
             debounce_flags[0] = 0;
@@ -955,8 +1005,8 @@ void vCheckCheatInput(int key)
 
         if (buttons.buttons[KEYCODE(2)]) {
 			if (!debounce_flags[1]) {
-                printf("2\n");
                 debounce_flags[1] = 1;
+                vSetCheat2();
             }
 		} else {
             debounce_flags[1] = 0;
@@ -964,8 +1014,8 @@ void vCheckCheatInput(int key)
 
         if (buttons.buttons[KEYCODE(3)]) {
 			if (!debounce_flags[2]) {
-                printf("3\n");
                 debounce_flags[2] = 1;
+                vSetCheat3();
             }
 		} else {
             debounce_flags[2] = 0;
@@ -977,8 +1027,6 @@ void vCheckCheatInput(int key)
 
 void vMenuDrawer(void *pvParameters)
 {
-	prints("Menu Init'd\n");
-
 	while (1) {
 		xSemaphoreTake(DrawSignal, portMAX_DELAY);
 		tumEventFetchEvents(FETCH_EVENT_BLOCK |
@@ -993,9 +1041,7 @@ void vMenuDrawer(void *pvParameters)
 		xSemaphoreGive(ScreenLock);
 
 		vCheckKeyboardInput();
-        vCheckCheatInput(KEYCODE(1));
-        vCheckCheatInput(KEYCODE(2));
-        vCheckCheatInput(KEYCODE(3));
+        vCheckCheatInput();
 	}
 }
 
@@ -1363,8 +1409,6 @@ void vDrawGameObjects(void)
 
 void vGameDrawer(void *pvParameters)
 {
-	prints("Game init'd\n");
-
 	while (1) {
 		xSemaphoreTake(DrawSignal, portMAX_DELAY);
         tumEventFetchEvents(FETCH_EVENT_BLOCK |
@@ -1481,8 +1525,6 @@ void vMonsterMover(void *pvParameters)
 
 void vPauseDrawer(void *pvParameters)
 {
-    prints("Pause init'd\n");
-
 	while (1) {
 		xSemaphoreTake(DrawSignal, portMAX_DELAY);
         tumEventFetchEvents(FETCH_EVENT_BLOCK |
@@ -1700,6 +1742,9 @@ int main(int argc, char *argv[])
     vInitMonsterDelay();
     vInitMothergunship();
     vInitBunkers();
+
+    printf("Welcome to Space Invaders Remastered HD!\n");
+
 	vTaskSuspender();
 
 	vTaskStartScheduler();
