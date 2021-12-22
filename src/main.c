@@ -64,6 +64,7 @@
 #define MOTHERGUNSHIP_BULLET 2
 #define N_BUNKERS 4
 #define ORIGINAL_TIMER 10000
+#define ORIGINAL_MONSTER_DELAY 65
 
 #ifdef TRACE_FUNCTIONS
 #include "tracer.h"
@@ -91,6 +92,7 @@ static QueueHandle_t CurrentStateQueue = NULL;
 static QueueHandle_t BulletQueue = NULL;
 static QueueHandle_t ColisionQueue = NULL;
 static QueueHandle_t TimerStartingQueue = NULL;
+static QueueHandle_t MonsterDelayQueue = NULL;
 
 static SemaphoreHandle_t DrawSignal = NULL;
 static SemaphoreHandle_t ScreenLock = NULL;
@@ -320,6 +322,30 @@ void vInitPlayer(void)
     my_player.lock = xSemaphoreCreateMutex();
 }
 
+void vResetMonsterDelay(void)
+{
+    TickType_t monster_delay;
+
+    monster_delay = ORIGINAL_MONSTER_DELAY;
+    xQueueOverwrite(MonsterDelayQueue, &monster_delay);
+}
+
+void vUpdateMonsterDelay(void)
+{
+    TickType_t monster_delay;
+
+    xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
+    monster_delay--;
+    xQueueOverwrite(MonsterDelayQueue, &monster_delay);
+}
+
+void vInitMonsterDelay(void)
+{
+    TickType_t monster_delay = ORIGINAL_MONSTER_DELAY;
+
+    xQueueOverwrite(MonsterDelayQueue, &monster_delay);
+}
+
 #define LEFT_TO_RIGHT 0
 #define RIGHT_TO_LEFT 1
 
@@ -438,6 +464,7 @@ void vResetGameBoard(void)
 {
     vResetQueues();
     vResetMonsters();
+    vResetMonsterDelay();
     vResetSpaceship();
     vResetBunkers();
     vKillMothergunship();
@@ -842,7 +869,7 @@ void vSwapBuffers(void *pvParameters)
 	}
 }
 
-#define CHANGE_IN_POSITION 3
+#define CHANGE_IN_POSITION 1
 
 void vMoveSpaceshipLeft(void)
 {
@@ -1061,6 +1088,7 @@ void vCheckBulletColision(void)
                     xSemaphoreTake(my_monsters.lock, portMAX_DELAY);
                     my_monsters.monster[i][j].alive = 0;
                     xSemaphoreGive(my_monsters.lock);
+                    vUpdateMonsterDelay();
                     goto colision_detected;
                 }
             }
@@ -1239,7 +1267,7 @@ void vGameLogic(void *pvParameters)
         vCheckMonstersDead();
         vCheckPlayerDead();
         vCheckPauseInput();
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(8));
 	}
 }
 
@@ -1429,14 +1457,22 @@ void vMonsterMover(void *pvParameters)
 {
     int i, j, direction = 1;
 
+    TickType_t monster_delay;
+
     while (1) {
         for (i = N_ROWS - 1 ; i >= 0; i--) {
             for (j = 0; j < N_COLUMNS; j++) {
                 if (xSemaphoreTake(my_monsters.lock, 0) == pdTRUE) {
-                    my_monsters.monster[i][j].x = my_monsters.monster[i][j].x + direction * 5;
-                    xSemaphoreGive(my_monsters.lock);
+                    if (my_monsters.monster[i][j].alive) {
+                        my_monsters.monster[i][j].x = my_monsters.monster[i][j].x + direction * 5;
+                        xSemaphoreGive(my_monsters.lock);
+                    } else {
+                        xSemaphoreGive(my_monsters.lock);
+                        continue;
+                    }
                 }
-                vTaskDelay(pdMS_TO_TICKS(10));
+                xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
+                vTaskDelay(pdMS_TO_TICKS(monster_delay));
             }
         }
         vUpdateDirection(&direction);
@@ -1584,6 +1620,13 @@ int main(int argc, char *argv[])
 		goto err_timer_starting_queue;
 	}
 
+    MonsterDelayQueue =
+		xQueueCreate(1, sizeof(TickType_t));
+	if (!MonsterDelayQueue) {
+		PRINT_ERROR("Could not open monster delay queue");
+		goto err_monster_delay_queue;
+	}
+
 	//Timers
     xMothergunshipTimer = xTimerCreate("Mothergunship Timer", pdMS_TO_TICKS(ORIGINAL_TIMER), pdTRUE, (void *) 0, vMothergunshipTimerCallback);
     if (xMothergunshipTimer == NULL) {
@@ -1618,7 +1661,7 @@ int main(int argc, char *argv[])
 	}
 
     if (xTaskCreate(vMonsterMover, "MonsterMover", STACK_SIZE,
-			NULL, mainGENERIC_PRIORITY + 4, &MonsterMover) != pdPASS) {
+			NULL, mainGENERIC_PRIORITY, &MonsterMover) != pdPASS) {
 		PRINT_TASK_ERROR("MonsterMover");
 		goto err_monster_mover;
 	}
@@ -1654,6 +1697,7 @@ int main(int argc, char *argv[])
     vInitPlayer();
     vInitSpaceship();
     vInitMonsters();
+    vInitMonsterDelay();
     vInitMothergunship();
     vInitBunkers();
 	vTaskSuspender();
@@ -1680,6 +1724,8 @@ err_bufferswap:
 err_statemachine:
     xTimerDelete(xMothergunshipTimer, portMAX_DELAY);
 err_mothergunship_timer:
+    vQueueDelete(MonsterDelayQueue);
+err_monster_delay_queue:
     vQueueDelete(TimerStartingQueue);
 err_timer_starting_queue:
     vQueueDelete(ColisionQueue);
