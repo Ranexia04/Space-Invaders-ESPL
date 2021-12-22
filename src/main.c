@@ -65,6 +65,7 @@
 #define N_BUNKERS 4
 #define ORIGINAL_TIMER 10000
 #define ORIGINAL_MONSTER_DELAY 65
+#define MAX_OBJECTS 10
 
 #ifdef TRACE_FUNCTIONS
 #include "tracer.h"
@@ -232,6 +233,15 @@ typedef struct bunker_grid {
 
 static bunker_grid_t my_bunkers = {0};
 
+struct saved_values {
+    int n_lives;
+    int score;
+    int offset;
+    SemaphoreHandle_t lock;
+};
+
+struct saved_values saved = {0};
+
 void vResetSpaceship(void)
 {
     xSemaphoreTake(my_spaceship.lock, portMAX_DELAY);
@@ -305,9 +315,9 @@ void vResetPlayer(void)
     if (my_player.score1 > my_player.highscore) {
         my_player.highscore = my_player.score1;
     }
-    my_player.score1 = 0;
+    my_player.score1 = saved.score;
     my_player.score2 = 0;
-    my_player.n_lives = 3;
+    my_player.n_lives = saved.n_lives;
     my_player.credits = 0;
     xSemaphoreGive(my_player.lock);
 }
@@ -326,7 +336,7 @@ void vResetMonsterDelay(void)
 {
     TickType_t monster_delay;
 
-    monster_delay = ORIGINAL_MONSTER_DELAY;
+    monster_delay = ORIGINAL_MONSTER_DELAY + saved.offset;
     xQueueOverwrite(MonsterDelayQueue, &monster_delay);
 }
 
@@ -344,6 +354,26 @@ void vInitMonsterDelay(void)
     TickType_t monster_delay = ORIGINAL_MONSTER_DELAY;
 
     xQueueOverwrite(MonsterDelayQueue, &monster_delay);
+}
+
+void vUpdateSavedValues(void)
+{
+    int monster_delay;
+
+    xSemaphoreTake(saved.lock, portMAX_DELAY);
+    saved.n_lives = my_player.n_lives;
+    saved.score = my_player.score1;
+    xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
+    saved.offset = monster_delay - ORIGINAL_MONSTER_DELAY;
+    xSemaphoreGive(saved.lock);
+}
+
+void vInitSavedValues(void)
+{
+    saved.n_lives = 3;
+    saved.score = 0;
+    saved.offset = 0;
+    saved.lock = xSemaphoreCreateMutex();
 }
 
 #define LEFT_TO_RIGHT 0
@@ -794,67 +824,6 @@ void basicSequentialStateMachine(void *pvParameters)
 	}
 }
 
-#define FPS_AVERAGE_COUNT 50
-#define FPS_FONT "IBMPlexSans-Bold.ttf"
-
-void vDrawFPS(void)
-{
-	static unsigned int periods[FPS_AVERAGE_COUNT] = { 0 };
-	static unsigned int periods_total = 0;
-	static unsigned int index = 0;
-	static unsigned int average_count = 0;
-	static TickType_t xLastWakeTime = 0, prevWakeTime = 0;
-	static char str[10] = { 0 };
-	static int text_width;
-	int fps = 0;
-	font_handle_t cur_font = tumFontGetCurFontHandle();
-
-	if (average_count < FPS_AVERAGE_COUNT) {
-		average_count++;
-	} else {
-		periods_total -= periods[index];
-	}
-
-	xLastWakeTime = xTaskGetTickCount();
-
-	if (prevWakeTime != xLastWakeTime) {
-		periods[index] =
-			configTICK_RATE_HZ / (xLastWakeTime - prevWakeTime);
-		prevWakeTime = xLastWakeTime;
-	} else {
-		periods[index] = 0;
-	}
-
-	periods_total += periods[index];
-
-	if (index == (FPS_AVERAGE_COUNT - 1)) {
-		index = 0;
-	} else {
-		index++;
-	}
-
-	fps = periods_total / average_count;
-
-	tumFontSelectFontFromName(FPS_FONT);
-
-	sprintf(str, "FPS: %2d", fps);
-
-	if (!tumGetTextSize((char *)str, &text_width, NULL))
-		checkDraw(tumDrawFilledBox(SCREEN_WIDTH - text_width - 10,
-					   SCREEN_HEIGHT -
-						   DEFAULT_FONT_SIZE * 1.5,
-					   text_width, DEFAULT_FONT_SIZE,
-					   BACKGROUND_COLOUR),
-			  __FUNCTION__);
-	checkDraw(tumDrawText(str, SCREEN_WIDTH - text_width - 10,
-			      SCREEN_HEIGHT - DEFAULT_FONT_SIZE * 1.5,
-			      TEXT_COLOUR),
-		  __FUNCTION__);
-
-	tumFontSelectFontFromHandle(cur_font);
-	tumFontPutFontHandle(cur_font);
-}
-
 void vSwapBuffers(void *pvParameters)
 {
 	TickType_t xLastWakeTime;
@@ -1042,20 +1011,23 @@ void vMenuDrawer(void *pvParameters)
 
 		vCheckKeyboardInput();
         vCheckCheatInput();
+        vUpdateSavedValues();
 	}
 }
+
+#define BULLET_CHANGE 3
 
 void vUpdateBulletPosition(void)
 {
     int i = 0, n_bullets;
-    bullet_t my_bullet[10];
+    bullet_t my_bullet[MAX_OBJECTS];
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
         if (my_bullet[i].type == SPACESHIP_BULLET)
-            my_bullet[i].y = my_bullet[i].y - 5;
+            my_bullet[i].y = my_bullet[i].y - BULLET_CHANGE;
         if (my_bullet[i].type == MONSTER_BULLET || my_bullet[i].type == MOTHERGUNSHIP_BULLET)
-            my_bullet[i].y = my_bullet[i].y + 5;
+            my_bullet[i].y = my_bullet[i].y + BULLET_CHANGE;
         i++;
     }
 
@@ -1104,7 +1076,7 @@ void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer)
 void vCheckBulletColision(void)
 {
     int k = 0, i, j, a, n_bullets;
-    bullet_t my_bullet[10];
+    bullet_t my_bullet[MAX_OBJECTS];
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &my_bullet[k], portMAX_DELAY);
@@ -1282,7 +1254,7 @@ reset_mothergunship:
 
 int vSpaceshipBulletActive(void)
 {
-    bullet_t my_bullet[10];
+    bullet_t my_bullet[MAX_OBJECTS];
     int bullet_active = 0, n_bullets, i = 0;
 
     while(uxQueueMessagesWaiting(BulletQueue)) {
@@ -1320,7 +1292,7 @@ void vGameLogic(void *pvParameters)
 void vDrawBullets(void)
 {
     int i = 0, n_bullets;
-    bullet_t my_bullet[10];
+    bullet_t my_bullet[MAX_OBJECTS];
 
     while(uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
@@ -1337,7 +1309,7 @@ void vDrawBullets(void)
 void vDrawColisions(void)
 {
     int i = 0, n_colisions;
-    colision_t my_colision[10];
+    colision_t my_colision[MAX_OBJECTS];
 
     while(uxQueueMessagesWaiting(ColisionQueue)) {
         xQueueReceive(ColisionQueue, &my_colision[i], portMAX_DELAY);
@@ -1487,6 +1459,8 @@ void vUpdateDirection(int *direction)
     for (i = 0; i < N_ROWS; i++) {
         right_index = vComputeRightMostMonster(i);
         left_index = vComputeLeftMostMonster(i);
+        if (right_index == -1 && left_index == -1)
+            continue;
         if (my_monsters.monster[i][left_index].x < 10 
                             || my_monsters.monster[i][right_index].x 
                             + my_monsters.monster[i][right_index].width > SCREEN_WIDTH - 10) {
@@ -1604,9 +1578,6 @@ int main(int argc, char *argv[])
 		goto err_init_safe_print;
 	}
 
-	//Load a second font for fun
-	tumFontLoadFont(FPS_FONT, DEFAULT_FONT_SIZE);
-
 	//Semaphores/Mutexes
 
 	buttons.lock = xSemaphoreCreateMutex(); // Locking mechanism
@@ -1642,28 +1613,28 @@ int main(int argc, char *argv[])
 	}
 
     BulletQueue =
-		xQueueCreate(10, sizeof(bullet_t));
+		xQueueCreate(MAX_OBJECTS, sizeof(bullet_t));
 	if (!BulletQueue) {
 		PRINT_ERROR("Could not open bullet queue");
 		goto err_bullet_queue;
 	}
 
     ColisionQueue =
-		xQueueCreate(10, sizeof(colision_t));
+		xQueueCreate(MAX_OBJECTS, sizeof(colision_t));
 	if (!ColisionQueue) {
 		PRINT_ERROR("Could not open colision queue");
 		goto err_colision_queue;
 	}
 
     TimerStartingQueue =
-		xQueueCreate(1, sizeof(TickType_t));
+		xQueueCreate(UNITARY_QUEUE_LENGHT, sizeof(TickType_t));
 	if (!TimerStartingQueue) {
 		PRINT_ERROR("Could not open timer value queue");
 		goto err_timer_starting_queue;
 	}
 
     MonsterDelayQueue =
-		xQueueCreate(1, sizeof(TickType_t));
+		xQueueCreate(UNITARY_QUEUE_LENGHT, sizeof(TickType_t));
 	if (!MonsterDelayQueue) {
 		PRINT_ERROR("Could not open monster delay queue");
 		goto err_monster_delay_queue;
@@ -1742,6 +1713,7 @@ int main(int argc, char *argv[])
     vInitMonsterDelay();
     vInitMothergunship();
     vInitBunkers();
+    vInitSavedValues();
 
     printf("Welcome to Space Invaders Remastered HD!\n");
 
