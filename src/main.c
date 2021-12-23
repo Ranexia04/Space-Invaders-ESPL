@@ -38,7 +38,7 @@
 #define NEXT_TASK 0
 #define PREV_TASK 1
 
-#define STARTING_STATE GAME
+#define STARTING_STATE MENU
 
 #define STATE_DEBOUNCE_DELAY 300
 
@@ -243,6 +243,7 @@ struct saved_values {
     int n_lives;
     int score;
     int offset;
+    int credits;
     SemaphoreHandle_t lock;
 };
 
@@ -323,7 +324,7 @@ void vResetPlayer(void)
     my_player.score1 = saved.score;
     my_player.score2 = 0;
     my_player.n_lives = saved.n_lives;
-    my_player.credits = 0;
+    my_player.credits = saved.credits;
     xSemaphoreGive(my_player.lock);
 }
 
@@ -370,6 +371,7 @@ void vUpdateSavedValues(void)
     saved.score = my_player.score1;
     xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
     saved.offset = monster_delay - ORIGINAL_MONSTER_DELAY;
+    saved.credits = my_player.credits - 1;
     xSemaphoreGive(saved.lock);
 }
 
@@ -378,6 +380,7 @@ void vInitSavedValues(void)
     saved.n_lives = 3;
     saved.score = 0;
     saved.offset = 0;
+    saved.credits = 0;
     saved.lock = xSemaphoreCreateMutex();
 }
 
@@ -495,6 +498,38 @@ void vResetQueues(void)
     }
 }
 
+void vInsertCoin(void)
+{
+    xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    my_player.credits++;
+    xSemaphoreGive(my_player.lock);
+    prints("Coin Inserted.\n");
+}
+
+void vUseCoin(void)
+{
+    xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    my_player.credits--;
+    xSemaphoreGive(my_player.lock);
+}
+
+void vCheckCoinInput(void)
+{
+    static int debounce_flag = 0;
+
+    if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+		if (buttons.buttons[KEYCODE(C)]) {
+			if (!debounce_flag) {
+                debounce_flag = 1;
+                vInsertCoin();
+            }
+		} else {
+            debounce_flag = 0;
+        }
+		xSemaphoreGive(buttons.lock);
+	}
+}
+
 void vResetGameBoard(void)
 {
     vResetQueues();
@@ -590,7 +625,8 @@ static int vCheckStateInput(void)
 				xSemaphoreGive(buttons.lock);
                 if (xQueuePeek(CurrentStateQueue, &current_state, 0) ==
 			    pdTRUE) {
-                    if (current_state == MENU) {
+                    if (current_state == MENU && my_player.credits > 0) {
+                        vUseCoin();
                         xQueueSend(StateChangeQueue, &next_state_signal, 0);
                     } else if (current_state == GAME) {
                         xQueueSend(StateChangeQueue, &prev_state_signal, 0);
@@ -903,17 +939,23 @@ void vCheckKeyboardInput(void)
 void vDrawMenuText(void)
 {
     vDrawScores();
-    vDrawText("PLAY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4, CENTERING);
-    vDrawText("SPACE INVADERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, CENTERING);
-    vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
-    checkDraw(tumDrawLoadedImage(mothergunship_image, SCREEN_WIDTH / 5 - 5, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5 - 10), __FUNCTION__);
-    vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
-    checkDraw(tumDrawSprite(monster_spritesheet[0], 0, 0, SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3 - 5), __FUNCTION__);
-    vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3, CENTERING);
-    checkDraw(tumDrawSprite(monster_spritesheet[1], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5 - 5), __FUNCTION__);
-    vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5, CENTERING);
-    checkDraw(tumDrawSprite(monster_spritesheet[2], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6 - 5), __FUNCTION__);
-    vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6, CENTERING);
+    if (my_player.credits) {
+        vDrawText("PLAY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4, CENTERING);
+        vDrawText("SPACE INVADERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, CENTERING);
+        vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
+        checkDraw(tumDrawLoadedImage(mothergunship_image, SCREEN_WIDTH / 5 - 5, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5 - 10), __FUNCTION__);
+        vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
+        checkDraw(tumDrawSprite(monster_spritesheet[0], 0, 0, SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3 - 5), __FUNCTION__);
+        vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3, CENTERING);
+        checkDraw(tumDrawSprite(monster_spritesheet[1], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5 - 5), __FUNCTION__);
+        vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5, CENTERING);
+        checkDraw(tumDrawSprite(monster_spritesheet[2], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6 - 5), __FUNCTION__);
+        vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6, CENTERING);
+    } else {
+        vDrawText("INSERT  COIN", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, CENTERING);
+        vDrawText("<1 OR 2 PLAYERS>", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
+        vDrawText("1 PLAYER", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3, CENTERING);
+    }
     vDrawCredit();
 }
 
@@ -946,7 +988,6 @@ void vSetCheat2(void)
         my_player.score1 = my_player.score1 + 500;
         prints("Raised player starting score!\n");
     }
-    
     xSemaphoreGive(my_player.lock);
 }
 
@@ -1018,6 +1059,7 @@ void vMenuDrawer(void *pvParameters)
 
 		vCheckKeyboardInput();
         vCheckCheatInput();
+        vCheckCoinInput();
         vUpdateSavedValues();
 	}
 }
