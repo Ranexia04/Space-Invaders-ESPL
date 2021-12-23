@@ -66,6 +66,8 @@
 #define ORIGINAL_TIMER 10000
 #define ORIGINAL_MONSTER_DELAY 65
 #define MAX_OBJECTS 10
+#define MONSTER_SPACING_V 34
+#define MONSTER_SPACING_H 39
 
 #ifdef TRACE_FUNCTIONS
 #include "tracer.h"
@@ -103,6 +105,8 @@ static image_handle_t monster_image[3] = {NULL};
 static image_handle_t colision_image[2] = {NULL};
 static image_handle_t mothergunship_image = NULL;
 static image_handle_t bunker_image[6] = {NULL};
+
+static spritesheet_handle_t monster_spritesheet[3] = {NULL};
 
 typedef struct buttons_buffer {
 	unsigned char buttons[SDL_NUM_SCANCODES];
@@ -161,7 +165,9 @@ typedef struct colision {
 } colision_t;
 
 typedef struct monster {
-    image_handle_t image;
+    spritesheet_handle_t spritesheet;
+    
+    int todraw;
 
     int x; /**< X pixel coord of monster on screen */
     int y; /**< Y pixel coord of monster on screen */
@@ -261,17 +267,15 @@ void vInitSpaceship(void)
 
 void vResetMonsters(void)
 {
-    int h_spacing, v_spacing, i, j;
-
-    h_spacing = tumDrawGetLoadedImageWidth(monster_image[2]);
-    v_spacing = tumDrawGetLoadedImageHeight(monster_image[2]);
+    int i, j;
 
     xSemaphoreTake(my_monsters.lock, portMAX_DELAY);
     for (i = 0; i < N_ROWS; i++) {
         for (j = 0; j < N_COLUMNS; j++) {
-            my_monsters.monster[i][j].x = 15 + h_spacing * 1.5 * j;
-            my_monsters.monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
+            my_monsters.monster[i][j].x = 15 + MONSTER_SPACING_H * j;
+            my_monsters.monster[i][j].y = SCREEN_HEIGHT / 4 + MONSTER_SPACING_V * i;
             my_monsters.monster[i][j].alive = 1;
+            my_monsters.monster[i][j].todraw = 0;
         }
     }
     xSemaphoreGive(my_monsters.lock);
@@ -279,33 +283,34 @@ void vResetMonsters(void)
 
 void vInitMonsters(void)
 {
-    int h_spacing, v_spacing, i, j;
-
-    h_spacing = tumDrawGetLoadedImageWidth(monster_image[2]);
-    v_spacing = tumDrawGetLoadedImageHeight(monster_image[2]);
+    int i, j;
 
     for (i = 0; i < N_ROWS; i++) {
         for (j = 0; j < N_COLUMNS; j++) {
             if (i == 0) {
                 my_monsters.monster[i][j].type = 0;
-                my_monsters.monster[i][j].image = monster_image[0];
+                my_monsters.monster[i][j].spritesheet = monster_spritesheet[0];
+                my_monsters.monster[i][j].width = tumDrawGetLoadedImageWidth(monster_image[0]) / 2;
+                my_monsters.monster[i][j].height = tumDrawGetLoadedImageHeight(monster_image[0]);
             }
             if (i == 1 || i == 2) {
                 my_monsters.monster[i][j].type = 1;
-                my_monsters.monster[i][j].image = monster_image[1];
+                my_monsters.monster[i][j].spritesheet = monster_spritesheet[1];
+                my_monsters.monster[i][j].width = tumDrawGetLoadedImageWidth(monster_image[1]) / 2;
+                my_monsters.monster[i][j].height = tumDrawGetLoadedImageHeight(monster_image[1]);
             }
             if (i == 3 || i == 4) {
                 my_monsters.monster[i][j].type = 2;
-                my_monsters.monster[i][j].image = monster_image[2];
+                my_monsters.monster[i][j].spritesheet = monster_spritesheet[2];
+                my_monsters.monster[i][j].width = tumDrawGetLoadedImageWidth(monster_image[2]) / 2;
+                my_monsters.monster[i][j].height = tumDrawGetLoadedImageHeight(monster_image[2]);
             }
-            my_monsters.monster[i][j].width = tumDrawGetLoadedImageWidth(my_monsters.monster[i][j].image);
-            my_monsters.monster[i][j].height = tumDrawGetLoadedImageHeight(my_monsters.monster[i][j].image);
-            my_monsters.monster[i][j].x = 15 + h_spacing * 1.5 * j;
-            my_monsters.monster[i][j].y = SCREEN_HEIGHT / 4 + v_spacing * 2 * i;
+            my_monsters.monster[i][j].x = 15 + MONSTER_SPACING_H * j;
+            my_monsters.monster[i][j].y = SCREEN_HEIGHT / 4 + MONSTER_SPACING_V * i;
             my_monsters.monster[i][j].alive = 1;
+            my_monsters.monster[i][j].todraw = 0;
         }
     }
-
     my_monsters.lock = xSemaphoreCreateMutex();
 }
 
@@ -1335,7 +1340,9 @@ void vDrawMonsters(void)
     for (i = 0; i < N_ROWS; i++) {
         for (j = 0; j < N_COLUMNS; j++) {
             if (my_monsters.monster[i][j].alive)
-                checkDraw(tumDrawLoadedImage(my_monsters.monster[i][j].image, my_monsters.monster[i][j].x, my_monsters.monster[i][j].y), __FUNCTION__);
+                checkDraw(tumDrawSprite(my_monsters.monster[i][j].spritesheet, my_monsters.monster[i][j].todraw, 0,
+                            my_monsters.monster[i][j].x, my_monsters.monster[i][j].y), __FUNCTION__);
+            
         }
     }
 }
@@ -1483,6 +1490,7 @@ void vMonsterMover(void *pvParameters)
                 if (xSemaphoreTake(my_monsters.lock, 0) == pdTRUE) {
                     if (my_monsters.monster[i][j].alive) {
                         my_monsters.monster[i][j].x = my_monsters.monster[i][j].x + direction * 5;
+                        my_monsters.monster[i][j].todraw = !my_monsters.monster[i][j].todraw;
                         xSemaphoreGive(my_monsters.lock);
                     } else {
                         xSemaphoreGive(my_monsters.lock);
@@ -1515,9 +1523,9 @@ void vPauseDrawer(void *pvParameters)
 void vInitImages(void)
 {
     spaceship_image = tumDrawLoadImage("spaceship.png");
-    monster_image[0] = tumDrawLoadImage("monster1.png");
-    monster_image[1] = tumDrawLoadImage("monster3.png");
-    monster_image[2] = tumDrawLoadImage("monster5.png");
+    monster_image[0] = tumDrawLoadImage("monster_spritesheet1.png");
+    monster_image[1] = tumDrawLoadImage("monster_spritesheet2.png");
+    monster_image[2] = tumDrawLoadImage("monster_spritesheet3.png");
     colision_image[0] = tumDrawLoadImage("colision1.png");
     colision_image[1] = tumDrawLoadImage("colision2.png");
     mothergunship_image = tumDrawLoadImage("mothergunship.png");
@@ -1527,6 +1535,14 @@ void vInitImages(void)
     bunker_image[3] = tumDrawLoadImage("bunker4.png");
     bunker_image[4] = tumDrawLoadImage("bunker5.png");
     bunker_image[5] = tumDrawLoadImage("bunker6.png");
+}
+
+void vInitSpriteSheets(void)
+{
+    
+    monster_spritesheet[0] = tumDrawLoadSpritesheet(monster_image[0], 2, 1);
+    monster_spritesheet[1] = tumDrawLoadSpritesheet(monster_image[1], 2, 1);
+    monster_spritesheet[2] = tumDrawLoadSpritesheet(monster_image[2], 2, 1);
 }
 
 void vSaveHighScore(void)
@@ -1707,6 +1723,7 @@ int main(int argc, char *argv[])
     atexit(vSaveHighScore);
 
     vInitImages();
+    vInitSpriteSheets();
     vInitPlayer();
     vInitSpaceship();
     vInitMonsters();
