@@ -908,11 +908,11 @@ void vDrawMenuText(void)
     vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
     checkDraw(tumDrawLoadedImage(mothergunship_image, SCREEN_WIDTH / 5 - 5, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5 - 10), __FUNCTION__);
     vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
-    checkDraw(tumDrawLoadedImage(monster_image[0], SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3 - 5), __FUNCTION__);
+    checkDraw(tumDrawSprite(monster_spritesheet[0], 0, 0, SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3 - 5), __FUNCTION__);
     vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3, CENTERING);
-    checkDraw(tumDrawLoadedImage(monster_image[1], SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5 - 5), __FUNCTION__);
+    checkDraw(tumDrawSprite(monster_spritesheet[1], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5 - 5), __FUNCTION__);
     vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5, CENTERING);
-    checkDraw(tumDrawLoadedImage(monster_image[2], SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6 - 5), __FUNCTION__);
+    checkDraw(tumDrawSprite(monster_spritesheet[2], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6 - 5), __FUNCTION__);
     vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6, CENTERING);
     vDrawCredit();
 }
@@ -938,13 +938,15 @@ void vSetCheat1(void)
 
 void vSetCheat2(void)
 {
-    int score1;
-
-    prints("The score to be set is ");
-    scanf("%d", &score1);
-    prints("\n");
     xSemaphoreTake(my_player.lock, portMAX_DELAY);
-    my_player.score1 = score1;
+    if (my_player.score1 > 9999) {
+        my_player.score1 = 0;
+        prints("Reseted player starting score.\n");
+    } else {
+        my_player.score1 = my_player.score1 + 500;
+        prints("Raised player starting score!\n");
+    }
+    
     xSemaphoreGive(my_player.lock);
 }
 
