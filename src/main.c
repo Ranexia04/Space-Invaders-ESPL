@@ -177,13 +177,14 @@ typedef struct monster {
 
     int type;
     int alive;
-
-    callback_t callback; /**< monster callback */
-    void *args; /**< monster callback args */
 } monster_t;
 
 typedef struct monster_grid {
     monster_t monster[N_ROWS][N_COLUMNS];
+
+    callback_t callback; /**< monster callback */
+    void *args; /**< monster callback args */
+
     SemaphoreHandle_t lock;
 } monster_grid_t;
 
@@ -266,6 +267,11 @@ void vInitSpaceship(void)
     my_spaceship.lock = xSemaphoreCreateMutex();
 }
 
+void vPlayMonsterSound(void *args)
+{
+    tumSoundPlayUserSample("fastinvader1.wav");
+}
+
 void vResetMonsters(void)
 {
     int i, j;
@@ -312,6 +318,9 @@ void vInitMonsters(void)
             my_monsters.monster[i][j].todraw = 0;
         }
     }
+
+    my_monsters.callback = vPlayMonsterSound;
+    my_monsters.args = NULL;
     my_monsters.lock = xSemaphoreCreateMutex();
 }
 
@@ -407,6 +416,7 @@ void vResetMothergunship(void)
 void vMothergunshipTimerCallback(TimerHandle_t xMothergunshipTimer)
 {
     vResetMothergunship();
+    tumSoundPlayUserSample("ufo_highpitch.wav");
 }
 
 void vKillMothergunship(void)
@@ -1155,6 +1165,7 @@ void vCheckBulletColision(void)
                     xSemaphoreTake(my_monsters.lock, portMAX_DELAY);
                     my_monsters.monster[i][j].alive = 0;
                     xSemaphoreGive(my_monsters.lock);
+                    tumSoundPlayUserSample("invaderkilled.wav");
                     vUpdateMonsterDelay();
                     goto colision_detected;
                 }
@@ -1177,6 +1188,7 @@ void vCheckBulletColision(void)
             my_player.n_lives--;
             xSemaphoreGive(my_player.lock);
             createColision(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y + my_spaceship.height / 2, colision_image[1]);
+            tumSoundPlayUserSample("explosion.wav");
             vResetSpaceship();
             goto colision_detected;
         }
@@ -1329,8 +1341,10 @@ void vGameLogic(void *pvParameters)
         vUpdateBulletPosition();
         vUpdateMothergunshipPosition();
         vCheckBulletColision();
-        if (tumEventGetMouseLeft() == 1 && vSpaceshipBulletActive() == 0)
+        if (tumEventGetMouseLeft() == 1 && vSpaceshipBulletActive() == 0) {
             vShootBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y, SPACESHIP_BULLET);
+            tumSoundPlayUserSample("shoot.wav");
+        }
         vCheckMonstersDead();
         vCheckPlayerDead();
         vCheckPauseInput();
@@ -1522,6 +1536,8 @@ void vUpdateDirection(int *direction)
     }
 }
 
+#define MONSTER_CHANGE 5
+
 void vMonsterMover(void *pvParameters)
 {
     int i, j, direction = 1;
@@ -1533,7 +1549,7 @@ void vMonsterMover(void *pvParameters)
             for (j = 0; j < N_COLUMNS; j++) {
                 if (xSemaphoreTake(my_monsters.lock, 0) == pdTRUE) {
                     if (my_monsters.monster[i][j].alive) {
-                        my_monsters.monster[i][j].x = my_monsters.monster[i][j].x + direction * 5;
+                        my_monsters.monster[i][j].x = my_monsters.monster[i][j].x + MONSTER_CHANGE * direction;
                         my_monsters.monster[i][j].todraw = !my_monsters.monster[i][j].todraw;
                         xSemaphoreGive(my_monsters.lock);
                     } else {
@@ -1544,6 +1560,8 @@ void vMonsterMover(void *pvParameters)
                 xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
                 vTaskDelay(pdMS_TO_TICKS(monster_delay));
             }
+            if (my_monsters.callback)
+                my_monsters.callback(my_monsters.args);
         }
         vUpdateDirection(&direction);
     }
@@ -1587,6 +1605,15 @@ void vInitSpriteSheets(void)
     monster_spritesheet[0] = tumDrawLoadSpritesheet(monster_image[0], 2, 1);
     monster_spritesheet[1] = tumDrawLoadSpritesheet(monster_image[1], 2, 1);
     monster_spritesheet[2] = tumDrawLoadSpritesheet(monster_image[2], 2, 1);
+}
+
+void vInitSounds(void)
+{
+    tumSoundLoadUserSample("/home/rtos-sim/Desktop/SpaceInvadersESPL/resources/waveforms/fastinvader1.wav");
+    tumSoundLoadUserSample("/home/rtos-sim/Desktop/SpaceInvadersESPL/resources/waveforms/invaderkilled.wav");
+    tumSoundLoadUserSample("/home/rtos-sim/Desktop/SpaceInvadersESPL/resources/waveforms/shoot.wav");
+    tumSoundLoadUserSample("/home/rtos-sim/Desktop/SpaceInvadersESPL/resources/waveforms/ufo_highpitch.wav");
+    tumSoundLoadUserSample("/home/rtos-sim/Desktop/SpaceInvadersESPL/resources/waveforms/explosion.wav");
 }
 
 void vSaveHighScore(void)
@@ -1768,6 +1795,7 @@ int main(int argc, char *argv[])
 
     vInitImages();
     vInitSpriteSheets();
+    vInitSounds();
     vInitPlayer();
     vInitSpaceship();
     vInitMonsters();
