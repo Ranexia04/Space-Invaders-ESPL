@@ -118,25 +118,20 @@ static buttons_buffer_t buttons = { 0 };
 typedef struct spaceship {
     image_handle_t image;
 
-    int x; /**< X pixel coord of ball on screen */
-    int y; /**< Y pixel coord of ball on screen */
+    int x;
+    int y;
 
     signed short width;
     signed short height;
 
-    float f_x; /**< Absolute X location of ball */
-    float f_y; /**< Absolute Y location of ball */
-
-    callback_t callback; /**< Collision callback */
-    void *args; /**< Collision callback args */
     SemaphoreHandle_t lock;
 } spaceship_t;
 
 static spaceship_t my_spaceship = { 0 };
 
 typedef struct bullet {
-    int x; /**< X pixel coord of spaceship on screen */
-    int y; /**< Y pixel coord of spaceship on screen */
+    int x;
+    int y;
 
     signed short width;
     signed short height;
@@ -144,37 +139,30 @@ typedef struct bullet {
     unsigned int colour;
 
     int type;
-
-    callback_t callback; /**< bullet callback */
-    void *args; /**< bullet callback args */
 } bullet_t;
 
 typedef struct colision {
     image_handle_t image;
 
-    int x; /**< X pixel coord of colision on screen */
-    int y; /**< Y pixel coord of colision on screen */
+    int x;
+    int y;
 
     signed short width;
     signed short height;
 
     int frame_number;
-
-    callback_t callback; /**< Collision callback */
-    void *args; /**< Collision callback args */
 } colision_t;
 
 typedef struct monster {
     spritesheet_handle_t spritesheet;
-    
-    int todraw;
 
-    int x; /**< X pixel coord of monster on screen */
-    int y; /**< Y pixel coord of monster on screen */
+    int x;
+    int y;
 
     signed short width;
     signed short height;
 
+    int todraw;
     int type;
     int alive;
 } monster_t;
@@ -204,8 +192,9 @@ static player_t my_player = { 0 };
 
 typedef struct mothergunship {
     image_handle_t image;
-    int x; /**< X pixel coord of mothergunship on screen */
-    int y; /**< Y pixel coord of mothergunship on screen */
+
+    int x;
+    int y;
 
     signed short width;
     signed short height;
@@ -220,8 +209,9 @@ static mothergunship_t my_mothergunship = { 0 };
 
 typedef struct bunker_component {
     image_handle_t image;
-    int x; /**< X pixel coord of mothergunship on screen */
-    int y; /**< Y pixel coord of mothergunship on screen */
+
+    int x;
+    int y;
 
     signed short width;
     signed short height;
@@ -245,6 +235,7 @@ struct saved_values {
     int score;
     int offset;
     int credits;
+
     SemaphoreHandle_t lock;
 };
 
@@ -266,6 +257,10 @@ void vInitSpaceship(void)
     my_spaceship.y = SPACESHIP_Y;
     my_spaceship.lock = xSemaphoreCreateMutex();
 }
+
+#define SMALL_MONSTER 0
+#define MEDIUM_MONSTER 1
+#define LARGE_MONSTER 2
 
 void vPlayMonsterSound(void *args)
 {
@@ -295,19 +290,19 @@ void vInitMonsters(void)
     for (i = 0; i < N_ROWS; i++) {
         for (j = 0; j < N_COLUMNS; j++) {
             if (i == 0) {
-                my_monsters.monster[i][j].type = 0;
+                my_monsters.monster[i][j].type = SMALL_MONSTER;
                 my_monsters.monster[i][j].spritesheet = monster_spritesheet[0];
                 my_monsters.monster[i][j].width = tumDrawGetLoadedImageWidth(monster_image[0]) / 2;
                 my_monsters.monster[i][j].height = tumDrawGetLoadedImageHeight(monster_image[0]);
             }
             if (i == 1 || i == 2) {
-                my_monsters.monster[i][j].type = 1;
+                my_monsters.monster[i][j].type = MEDIUM_MONSTER;
                 my_monsters.monster[i][j].spritesheet = monster_spritesheet[1];
                 my_monsters.monster[i][j].width = tumDrawGetLoadedImageWidth(monster_image[1]) / 2;
                 my_monsters.monster[i][j].height = tumDrawGetLoadedImageHeight(monster_image[1]);
             }
             if (i == 3 || i == 4) {
-                my_monsters.monster[i][j].type = 2;
+                my_monsters.monster[i][j].type = LARGE_MONSTER;
                 my_monsters.monster[i][j].spritesheet = monster_spritesheet[2];
                 my_monsters.monster[i][j].width = tumDrawGetLoadedImageWidth(monster_image[2]) / 2;
                 my_monsters.monster[i][j].height = tumDrawGetLoadedImageHeight(monster_image[2]);
@@ -323,6 +318,8 @@ void vInitMonsters(void)
     my_monsters.args = NULL;
     my_monsters.lock = xSemaphoreCreateMutex();
 }
+
+#define INITIAL_LIVES 3
 
 void vResetPlayer(void)
 {
@@ -342,7 +339,7 @@ void vInitPlayer(void)
     my_player.score1 = 0;
     my_player.highscore = 0;
     my_player.score2 = 0;
-    my_player.n_lives = 3;
+    my_player.n_lives = INITIAL_LIVES;
     my_player.credits = 0;
     my_player.lock = xSemaphoreCreateMutex();
 }
@@ -355,7 +352,7 @@ void vResetMonsterDelay(void)
     xQueueOverwrite(MonsterDelayQueue, &monster_delay);
 }
 
-void vUpdateMonsterDelay(void)
+void vDecreaseMonsterDelay(void)
 {
     TickType_t monster_delay;
 
@@ -386,7 +383,7 @@ void vUpdateSavedValues(void)
 
 void vInitSavedValues(void)
 {
-    saved.n_lives = 3;
+    saved.n_lives = INITIAL_LIVES;
     saved.score = 0;
     saved.offset = 0;
     saved.credits = 0;
@@ -464,24 +461,24 @@ void vInitBunkers(void)
     for (k = 0; k < N_BUNKERS; k++) {
         for (i = 0; i < 2; i++) {
             for (j = 0; j < 3; j++) {
-                if (i == 0 && j == 0) {
+                if (i == 0 && j == 0) 
                     my_bunkers.bunker[k].component[i][j].image = bunker_image[0];
-                }
-                if (i == 0 && j == 1) {
+                
+                if (i == 0 && j == 1) 
                     my_bunkers.bunker[k].component[i][j].image = bunker_image[1];
-                }
-                if (i == 0 && j == 2) {
+                
+                if (i == 0 && j == 2) 
                     my_bunkers.bunker[k].component[i][j].image = bunker_image[2];
-                }
-                if (i == 1 && j == 0) {
+                
+                if (i == 1 && j == 0) 
                     my_bunkers.bunker[k].component[i][j].image = bunker_image[3];
-                }
-                if (i == 1 && j == 1) {
+                
+                if (i == 1 && j == 1) 
                     my_bunkers.bunker[k].component[i][j].image = bunker_image[4];
-                }
-                if (i == 1 && j == 2) {
+                
+                if (i == 1 && j == 2) 
                     my_bunkers.bunker[k].component[i][j].image = bunker_image[5];
-                }
+                
                 my_bunkers.bunker[k].component[i][j].width = tumDrawGetLoadedImageWidth(my_bunkers.bunker[k].component[i][j].image);
                 my_bunkers.bunker[k].component[i][j].height = tumDrawGetLoadedImageHeight(my_bunkers.bunker[k].component[i][j].image);
                 my_bunkers.bunker[k].component[i][j].x = SCREEN_WIDTH * k / N_BUNKERS + j * my_bunkers.bunker[k].component[i][j].width + 30;
@@ -494,14 +491,18 @@ void vInitBunkers(void)
     my_bunkers.lock = xSemaphoreCreateMutex();
 }
 
-void vResetQueues(void)
+void vResetBulletQueue(void)
 {
     bullet_t bullet;
-    colision_t colision;
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &bullet, portMAX_DELAY);
     }
+}
+
+void vResetColisionQueue(void)
+{
+    colision_t colision;
 
     while (uxQueueMessagesWaiting(ColisionQueue)) {
         xQueueReceive(ColisionQueue, &colision, portMAX_DELAY);
@@ -513,7 +514,6 @@ void vInsertCoin(void)
     xSemaphoreTake(my_player.lock, portMAX_DELAY);
     my_player.credits++;
     xSemaphoreGive(my_player.lock);
-    prints("Coin Inserted.\n");
 }
 
 void vUseCoin(void)
@@ -532,6 +532,7 @@ void vCheckCoinInput(void)
 			if (!debounce_flag) {
                 debounce_flag = 1;
                 vInsertCoin();
+                prints("Coin Inserted.\n");
             }
 		} else {
             debounce_flag = 0;
@@ -542,7 +543,8 @@ void vCheckCoinInput(void)
 
 void vResetGameBoard(void)
 {
-    vResetQueues();
+    vResetBulletQueue();
+    vResetColisionQueue();
     vResetMonsters();
     vResetMonsterDelay();
     vResetSpaceship();
@@ -979,7 +981,7 @@ void vSetCheat1(void)
         return;
     }
     if (my_player.n_lives > 3) {
-        my_player.n_lives = 3;
+        my_player.n_lives = INITIAL_LIVES;
         prints("You now have standard ammount of lives!\n");
         xSemaphoreGive(my_player.lock);
         return;
@@ -1151,13 +1153,13 @@ void vCheckBulletColision(void)
                             && my_bullet[k].y <= my_monsters.monster[i][j].y + my_monsters.monster[i][j].height
                             && my_bullet[k].x >= my_monsters.monster[i][j].x
                             && my_bullet[k].x <= my_monsters.monster[i][j].x + my_monsters.monster[i][j].width
-                            && my_monsters.monster[i][j].alive == 1 && my_bullet[k].type == SPACESHIP_BULLET) {
+                            && my_monsters.monster[i][j].alive && my_bullet[k].type == SPACESHIP_BULLET) {
                     xSemaphoreTake(my_player.lock, portMAX_DELAY);//TALVEZ FAZER FUNÇÃO QUE DEIA REPLACE NESTE BLOCO PARA FICAR MAIS FACIL DE LER
-                    if (my_monsters.monster[i][j].type == 0)
+                    if (my_monsters.monster[i][j].type == SMALL_MONSTER)
                         my_player.score1 = my_player.score1 + 30;
-                    if (my_monsters.monster[i][j].type == 1)
+                    if (my_monsters.monster[i][j].type == MEDIUM_MONSTER)
                         my_player.score1 = my_player.score1 + 20;
-                    if (my_monsters.monster[i][j].type == 2)
+                    if (my_monsters.monster[i][j].type == LARGE_MONSTER)
                         my_player.score1 = my_player.score1 + 10;
                     xSemaphoreGive(my_player.lock);
                     createColision(my_monsters.monster[i][j].x + my_monsters.monster[i][j].width / 2, 
@@ -1166,7 +1168,7 @@ void vCheckBulletColision(void)
                     my_monsters.monster[i][j].alive = 0;
                     xSemaphoreGive(my_monsters.lock);
                     tumSoundPlayUserSample("invaderkilled.wav");
-                    vUpdateMonsterDelay();
+                    vDecreaseMonsterDelay();
                     goto colision_detected;
                 }
             }
@@ -1197,7 +1199,7 @@ void vCheckBulletColision(void)
                             && my_bullet[k].y <= my_mothergunship.y + my_mothergunship.height
                             && my_bullet[k].x >= my_mothergunship.x
                             && my_bullet[k].x <= my_mothergunship.x + my_mothergunship.width
-                            && my_mothergunship.alive == 1 
+                            && my_mothergunship.alive 
                             && my_bullet[k].type == SPACESHIP_BULLET) {
             vKillMothergunship();
             xSemaphoreTake(my_player.lock, portMAX_DELAY);
