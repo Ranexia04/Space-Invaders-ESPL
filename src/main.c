@@ -84,6 +84,7 @@ static TaskHandle_t GameDrawer = NULL;
 static TaskHandle_t MonsterBulletShooter = NULL;
 static TaskHandle_t MonsterMover = NULL;
 static TaskHandle_t PauseDrawer = NULL;
+static TaskHandle_t CheckInputSetScore = NULL;
 
 static TimerHandle_t xMothergunshipTimer;
 
@@ -782,6 +783,9 @@ void vTaskSuspender()
     if (PauseDrawer) {
 		vTaskSuspend(PauseDrawer);
     }
+    if (CheckInputSetScore) {
+		vTaskSuspend(CheckInputSetScore);
+    }
 }
 
 void basicSequentialStateMachine(void *pvParameters)
@@ -990,16 +994,49 @@ void vSetCheat1(void)
     return;
 }
 
+void vCheckInputSetScore(void *pvParameters)
+{
+    int i, digit;
+    char text[10] = {'0'};
+    char digit_in_text;
+    vTaskDelay(100);
+
+    while(1) {
+        tumEventFetchEvents(FETCH_EVENT_BLOCK |
+					FETCH_EVENT_NO_GL_CHECK);
+        xGetButtonInput();
+        if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+            for (i = 30; i < 40; i++) {
+                if (buttons.buttons[i]) {
+                    buttons.buttons[i] = 0;
+                    digit = i - 29;
+                    //the scancode for button 0 after the number 9 so we have to decrement 10
+                    if (digit == 10)
+                        digit = 0;
+                    printf("%d\n", digit);
+                    digit_in_text = digit + '0';
+                    //strcat(text, digit_in_text);
+                    sprintf(text, "%s%c", text, digit_in_text);
+                }
+            }
+            if (buttons.buttons[SDL_SCANCODE_RETURN]) {
+                my_player.score1 = atoi(text);
+                xSemaphoreGive(buttons.lock);
+                vTaskResume(MenuDrawer);
+                vTaskSuspend(CheckInputSetScore);
+            }
+            xSemaphoreGive(buttons.lock);
+        }
+        vTaskDelay(20);
+    }
+}
+
 void vSetCheat2(void)
 {
     xSemaphoreTake(my_player.lock, portMAX_DELAY);
-    if (my_player.score1 > 9999) {
-        my_player.score1 = 0;
-        prints("Reseted player starting score.\n");
-    } else {
-        my_player.score1 = my_player.score1 + 500;
-        prints("Raised player starting score!\n");
-    }
+    vTaskResume(CheckInputSetScore);
+    vTaskSuspend(MenuDrawer);
+    prints("Starting score set\n");
     xSemaphoreGive(my_player.lock);
 }
 
@@ -1035,7 +1072,9 @@ void vCheckCheatInput(void)
         if (buttons.buttons[KEYCODE(2)]) {
 			if (!debounce_flags[1]) {
                 debounce_flags[1] = 1;
+                xSemaphoreGive(buttons.lock);
                 vSetCheat2();
+                return;
             }
 		} else {
             debounce_flags[1] = 0;
@@ -1791,6 +1830,13 @@ int main(int argc, char *argv[])
 		goto err_PauseDrawer;
 	}
 
+    if (xTaskCreate(vCheckInputSetScore, "CheckInputSetScore", STACK_SIZE,
+			NULL, mainGENERIC_PRIORITY,
+			&CheckInputSetScore) != pdPASS) {
+		PRINT_TASK_ERROR("CheckInputSetScore");
+		goto err_CheckInputSetScore;
+	}
+
     srand(time(NULL));
 
     atexit(vSaveHighScore);
@@ -1813,7 +1859,8 @@ int main(int argc, char *argv[])
 	vTaskStartScheduler();
 
 	return EXIT_SUCCESS;
-
+    vTaskDelete(CheckInputSetScore);
+err_CheckInputSetScore:
 	vTaskDelete(PauseDrawer);
 err_PauseDrawer:
 	vTaskDelete(GameDrawer);
