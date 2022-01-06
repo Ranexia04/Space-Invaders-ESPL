@@ -21,7 +21,7 @@
 #include "TUM_FreeRTOS_Utils.h"
 #include "TUM_Print.h"
 
-//#include "AsyncIO.h"
+#include "AsyncIO.h"
 
 #define mainGENERIC_PRIORITY (tskIDLE_PRIORITY)
 #define mainGENERIC_STACK_SIZE ((unsigned short)2560)
@@ -69,6 +69,10 @@
 #define MONSTER_SPACING_V 34
 #define MONSTER_SPACING_H 39
 
+#define UDP_RECEIVE_PORT 1234
+#define UDP_TRANSMIT_PORT 1235
+#define IPv4_addr "127.0.0.1"
+
 #ifdef TRACE_FUNCTIONS
 #include "tracer.h"
 #endif
@@ -108,6 +112,9 @@ static image_handle_t mothergunship_image = NULL;
 static image_handle_t bunker_image[6] = {NULL};
 
 static spritesheet_handle_t monster_spritesheet[3] = {NULL};
+
+static aIO_handle_t UDP_receive_handle = NULL;
+static aIO_handle_t UDP_transmit_handle = NULL;
 
 typedef struct buttons_buffer {
 	unsigned char buttons[SDL_NUM_SCANCODES];
@@ -185,6 +192,7 @@ typedef struct player {
     int score2;
     int n_lives;
     int credits;
+    int n_players;
 
     SemaphoreHandle_t lock;
 } player_t;
@@ -342,6 +350,7 @@ void vInitPlayer(void)
     my_player.score2 = 0;
     my_player.n_lives = INITIAL_LIVES;
     my_player.credits = 0;
+    my_player.n_players = 1;
     my_player.lock = xSemaphoreCreateMutex();
 }
 
@@ -747,6 +756,9 @@ void vDrawScores(void)
     vDrawText("HI-SCORE", SCREEN_WIDTH / 3 + 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
     vDrawNumber(my_player.highscore, SCREEN_WIDTH / 3 + 25, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
     vDrawText("SCORE<2>", SCREEN_WIDTH * 2 / 3 + 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
+    if (my_player.n_players == 2) {
+        vDrawNumber(my_player.score2, SCREEN_WIDTH * 2 / 3 + 25, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
+    }
 }
 
 void vDrawCredit(void)
@@ -842,8 +854,13 @@ void basicSequentialStateMachine(void *pvParameters)
 				break;
 			case GAME:
                 if (prev_state == MENU || prev_state == current_state) {
-                    xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+                    if (my_player.n_players == 1)
+                        xTimerReset(xMothergunshipTimer, portMAX_DELAY);
                     prints("Match started! Good luck and Have fun!\n");
+                    if (my_player.n_players == 2) {
+                        
+                        prints("2 Players selected.\n");
+                    }
                 }
                 if (prev_state == PAUSE) {
                     xTimerChangePeriod(xMothergunshipTimer, ORIGINAL_TIMER - timer_elapsed, portMAX_DELAY);
@@ -864,10 +881,12 @@ void basicSequentialStateMachine(void *pvParameters)
 				break;
             case PAUSE:
                 if (prev_state == GAME) {
+                    if (my_player.n_players == 1) {
+                        xTimerStop(xMothergunshipTimer, portMAX_DELAY);
+                        timer_starting = xQueuePeek(TimerStartingQueue, &timer_starting, portMAX_DELAY);
+                        timer_elapsed = xTaskGetTickCount() - timer_starting;
+                    }
                     prints("Game paused.\n");
-                    xTimerStop(xMothergunshipTimer, portMAX_DELAY);
-                    timer_starting = xQueuePeek(TimerStartingQueue, &timer_starting, portMAX_DELAY);
-                    timer_elapsed = xTaskGetTickCount() - timer_starting;
                 }
                 if (PauseDrawer) {
 					vTaskResume(PauseDrawer);
@@ -955,22 +974,32 @@ void vCheckKeyboardInput(void)
 void vDrawMenuText(void)
 {
     vDrawScores();
-    if (my_player.credits) {
-        vDrawText("PLAY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4, CENTERING);
-        vDrawText("SPACE INVADERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, CENTERING);
-        vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
-        checkDraw(tumDrawLoadedImage(mothergunship_image, SCREEN_WIDTH / 5 - 5, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5 - 10), __FUNCTION__);
-        vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
-        checkDraw(tumDrawSprite(monster_spritesheet[0], 0, 0, SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3 - 5), __FUNCTION__);
-        vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 3, CENTERING);
-        checkDraw(tumDrawSprite(monster_spritesheet[1], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5 - 5), __FUNCTION__);
-        vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 4.5, CENTERING);
-        checkDraw(tumDrawSprite(monster_spritesheet[2], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6 - 5), __FUNCTION__);
-        vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + DEFAULT_FONT_SIZE * 6, CENTERING);
+    if (my_player.credits && my_player.n_players) {
+        vDrawText("PLAY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 - 10, CENTERING);
+        vDrawText("SPACE INVADERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 + DEFAULT_FONT_SIZE * 1.5 - 10, CENTERING);
+
+        vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
+        checkDraw(tumDrawLoadedImage(mothergunship_image, SCREEN_WIDTH / 5 - 5, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 3), __FUNCTION__);
+        vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 3, CENTERING);
+        checkDraw(tumDrawSprite(monster_spritesheet[0], 0, 0, SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 4.5), __FUNCTION__);
+        vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 4.5, CENTERING);
+        checkDraw(tumDrawSprite(monster_spritesheet[1], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 6), __FUNCTION__);
+        vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 6, CENTERING);
+        checkDraw(tumDrawSprite(monster_spritesheet[2], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 7.5), __FUNCTION__);
+        vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 7.5, CENTERING);
+
+        vDrawText("[I]NFINITE LIVES", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4, CENTERING);
+        vDrawText("STARTING [S]CORE", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
+        vDrawText("STARTING [L]EVEL", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4 + DEFAULT_FONT_SIZE * 3, CENTERING);
     } else {
-        vDrawText("INSERT  COIN", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, CENTERING);
-        vDrawText("<1 OR 2 PLAYERS>", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
-        vDrawText("1 PLAYER", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3, CENTERING);
+        vDrawText("INSERT  [C]OIN", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, CENTERING);
+        vDrawText("<[1] OR [2] PLAYERS>", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
+        if (my_player.n_players == 1) {
+            vDrawText("1 PLAYER", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3, CENTERING);
+        }
+        if (my_player.n_players == 2) {
+            vDrawText("2 PLAYERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3, CENTERING);
+        }
     }
     vDrawCredit();
 }
@@ -1034,6 +1063,7 @@ void vCheckInputSetScore(void *pvParameters)
 void vSetCheat2(void)
 {
     xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    prints("Input the starting score with keyboard and press enter.\n");
     vTaskResume(CheckInputSetScore);
     vTaskSuspend(MenuDrawer);
     prints("Starting score set\n");
@@ -1060,7 +1090,7 @@ void vCheckCheatInput(void)
     static int debounce_flags[3] = {0};
 
     if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-		if (buttons.buttons[KEYCODE(1)]) {
+		if (buttons.buttons[KEYCODE(I)]) {
 			if (!debounce_flags[0]) {
                 debounce_flags[0] = 1;
                 vSetCheat1();
@@ -1069,7 +1099,7 @@ void vCheckCheatInput(void)
             debounce_flags[0] = 0;
         }
 
-        if (buttons.buttons[KEYCODE(2)]) {
+        if (buttons.buttons[KEYCODE(S)]) {
 			if (!debounce_flags[1]) {
                 debounce_flags[1] = 1;
                 xSemaphoreGive(buttons.lock);
@@ -1080,7 +1110,7 @@ void vCheckCheatInput(void)
             debounce_flags[1] = 0;
         }
 
-        if (buttons.buttons[KEYCODE(3)]) {
+        if (buttons.buttons[KEYCODE(L)]) {
 			if (!debounce_flags[2]) {
                 debounce_flags[2] = 1;
                 vSetCheat3();
@@ -1089,6 +1119,23 @@ void vCheckCheatInput(void)
             debounce_flags[2] = 0;
         }
 
+		xSemaphoreGive(buttons.lock);
+	}
+}
+
+void vCheckPlayerSet(void)
+{
+    if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+		if (buttons.buttons[KEYCODE(1)]) {
+			xSemaphoreTake(my_player.lock, portMAX_DELAY);
+            my_player.n_players = 1;
+            xSemaphoreGive(my_player.lock);
+		}
+        if (buttons.buttons[KEYCODE(2)]) {
+			xSemaphoreTake(my_player.lock, portMAX_DELAY);
+            my_player.n_players = 2;
+            xSemaphoreGive(my_player.lock);
+		}
 		xSemaphoreGive(buttons.lock);
 	}
 }
@@ -1111,6 +1158,7 @@ void vMenuDrawer(void *pvParameters)
 		vCheckKeyboardInput();
         vCheckCheatInput();
         vCheckCoinInput();
+        vCheckPlayerSet();
         vUpdateSavedValues();
 	}
 }
@@ -1657,6 +1705,14 @@ void vInitSounds(void)
     tumSoundLoadUserSample("/home/rtos-sim/Desktop/SpaceInvadersESPL/resources/waveforms/explosion.wav");
 }
 
+void vInitPVP(void)
+{
+    UDP_receive_handle = aIOOpenUDPSocket(IPv4_addr, UDP_RECEIVE_PORT, sizeof(int), 
+            NULL, NULL);
+    UDP_transmit_handle = aIOOpenUDPSocket(IPv4_addr, UDP_TRANSMIT_PORT, sizeof(int), 
+            NULL, NULL);
+}
+
 void vSaveHighScore(void)
 {
     FILE *fp = NULL;
@@ -1840,6 +1896,7 @@ int main(int argc, char *argv[])
     srand(time(NULL));
 
     atexit(vSaveHighScore);
+    atexit(aIODeinit);
 
     vInitImages();
     vInitSpriteSheets();
@@ -1851,6 +1908,7 @@ int main(int argc, char *argv[])
     vInitMothergunship();
     vInitBunkers();
     vInitSavedValues();
+    vInitPVP();
 
     printf("Welcome to Space Invaders Remastered HD!\n");
 
