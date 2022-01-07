@@ -1422,6 +1422,61 @@ int vSpaceshipBulletActive(void)
     return bullet_active;
 }
 
+void vSendPlayerLocation(void)
+{
+    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)&my_spaceship.x, sizeof(my_spaceship.x))) {
+        PRINT_ERROR("Failed to send position to opponent");
+    } else {
+        prints("Sent position to opponent\n");
+    }
+}
+
+void vSendPlayerBulletState(char tosend[12])
+{
+    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)tosend, strlen(tosend))) {
+        PRINT_ERROR("Failed to bullet state to opponent");
+    } else {
+        prints("Sent bullet state (%s) to opponent\n", tosend);
+    }
+}
+
+void vSendDifficultyChange(int difficulty)
+{
+    char tosend[3];
+
+    if (difficulty == 1)
+        strcpy(tosend, "D1");
+    if (difficulty == 2)
+        strcpy(tosend, "D2");
+    if (difficulty == 3)
+        strcpy(tosend, "D3");
+
+    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)tosend, strlen(tosend))) {
+        PRINT_ERROR("Failed to difficulty change to opponent");
+    } else {
+        prints("Sent difficulty change (%s) to opponent\n", tosend);
+    }
+}
+
+void vCheckMothergunshipDifficultyChange(void)
+{
+    if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
+		if (buttons.buttons[KEYCODE(1)]) {
+			buttons.buttons[KEYCODE(1)] = 0;
+            vSendDifficultyChange(1);
+        }
+        if (buttons.buttons[KEYCODE(2)]) {
+			buttons.buttons[KEYCODE(2)] = 0;
+            vSendDifficultyChange(2);
+        }
+        if (buttons.buttons[KEYCODE(3)]) {
+			buttons.buttons[KEYCODE(3)] = 0;
+            vSendDifficultyChange(3);
+        }
+		xSemaphoreGive(buttons.lock);
+	}
+}
+
 void vGameLogic(void *pvParameters)
 {
 	while (1) {
@@ -1430,13 +1485,22 @@ void vGameLogic(void *pvParameters)
         vUpdateBulletPosition();
         vUpdateMothergunshipPosition();
         vCheckBulletColision();
-        if (tumEventGetMouseLeft() == 1 && vSpaceshipBulletActive() == 0) {
+        if (tumEventGetMouseLeft() && !vSpaceshipBulletActive()) {
             vShootBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y, SPACESHIP_BULLET);
             tumSoundPlayUserSample("shoot.wav");
         }
         vCheckMonstersDead();
         vCheckPlayerDead();
         vCheckPauseInput();
+        if (my_player.n_players == 2) {
+            vSendPlayerLocation();
+            if (vSpaceshipBulletActive()) {
+                vSendPlayerBulletState("ATTACKING");
+            } else {
+                vSendPlayerBulletState("PASSIVE");
+            }
+            vCheckMothergunshipDifficultyChange();
+        }
         vTaskDelay(pdMS_TO_TICKS(8));
 	}
 }
@@ -1705,11 +1769,33 @@ void vInitSounds(void)
     tumSoundLoadUserSample("/home/rtos-sim/Desktop/SpaceInvadersESPL/resources/waveforms/explosion.wav");
 }
 
+void vReceiveCallback(size_t receive_size, char *buffer, void *args)
+{
+    int current_state;
+
+    if (xQueuePeek(CurrentStateQueue, &current_state, 0) == pdTRUE) {
+        if (current_state == GAME && my_player.n_players == 2) {
+            if (strcmp(buffer, "INC") == 0) {
+                prints("Received order to increment position\n");
+            }
+            if (strcmp(buffer, "DEC") == 0) {
+                prints("Received order to decrement position\n");
+            }
+            if (strcmp(buffer, "HALT") == 0) {
+                prints("Received order to stop\n");
+            }
+        }
+    }
+}
+
 void vInitPVP(void)
 {
-    UDP_receive_handle = aIOOpenUDPSocket(IPv4_addr, UDP_RECEIVE_PORT, sizeof(int), 
-            NULL, NULL);
-    UDP_transmit_handle = aIOOpenUDPSocket(IPv4_addr, UDP_TRANSMIT_PORT, sizeof(int), 
+    //struct receive_args my_receive_args = {0};
+    //struct transmit_args my_transmit_args = {0};
+
+    UDP_receive_handle = aIOOpenUDPSocket(IPv4_addr, UDP_RECEIVE_PORT, sizeof("HALT"), 
+            vReceiveCallback, NULL);
+    UDP_transmit_handle = aIOOpenUDPSocket(IPv4_addr, UDP_TRANSMIT_PORT, sizeof("ATTACKING"), 
             NULL, NULL);
 }
 
