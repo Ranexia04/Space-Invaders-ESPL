@@ -56,7 +56,7 @@
 #define TOP_LINE_Y 75
 #define SPACESHIP_Y SCREEN_HEIGHT - 75
 #define MOTHERGUNSHIP_Y 83
-#define BULLET_HEIGHT 5
+#define BULLET_HEIGHT 8
 #define N_ROWS 5
 #define N_COLUMNS 11
 #define SPACESHIP_BULLET 0
@@ -402,6 +402,15 @@ void vInitSavedValues(void)
 
 #define LEFT_TO_RIGHT 0
 #define RIGHT_TO_LEFT 1
+#define STOP 2
+
+void vSetUpMothergunshipPVP(void)
+{
+    xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
+    my_mothergunship.x = SCREEN_WIDTH * 2 / 3 - my_mothergunship.width / 2;
+    my_mothergunship.alive = 1;
+    xSemaphoreGive(my_mothergunship.lock);
+}
 
 void vResetMothergunship(void)
 {
@@ -559,8 +568,12 @@ void vResetGameBoard(void)
     vResetMonsterDelay();
     vResetSpaceship();
     vResetBunkers();
-    vKillMothergunship();
-    xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+    if (my_player.n_players == 1) {
+        vKillMothergunship();
+        xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+    }
+    else
+        vSetUpMothergunshipPVP();
 }
 
 void checkDraw(unsigned char status, const char *msg)
@@ -858,7 +871,7 @@ void basicSequentialStateMachine(void *pvParameters)
                         xTimerReset(xMothergunshipTimer, portMAX_DELAY);
                     prints("Match started! Good luck and Have fun!\n");
                     if (my_player.n_players == 2) {
-                        
+                        vSetUpMothergunshipPVP();
                         prints("2 Players selected.\n");
                     }
                 }
@@ -1194,7 +1207,12 @@ void vShootBullet(int initial_x, int initial_y, int type)
     my_bullet.width = 1;
     my_bullet.height = BULLET_HEIGHT;
     my_bullet.type = type;
-    my_bullet.colour = White;
+    if (my_bullet.type == SPACESHIP_BULLET)
+        my_bullet.colour = Green;
+    if (my_bullet.type == MONSTER_BULLET)
+        my_bullet.colour = White;
+    if (my_bullet.type == MOTHERGUNSHIP_BULLET)
+        my_bullet.colour = Red;
 
     xQueueSend(BulletQueue, &my_bullet, portMAX_DELAY);
 }
@@ -1276,6 +1294,11 @@ void vCheckBulletColision(void)
             xSemaphoreTake(my_player.lock, portMAX_DELAY);
             my_player.n_lives--;
             xSemaphoreGive(my_player.lock);
+            if (my_bullet[k].type == MOTHERGUNSHIP_BULLET) {
+                xSemaphoreTake(my_player.lock, portMAX_DELAY);
+                my_player.score2 = my_player.score2 + 1000;
+                xSemaphoreGive(my_player.lock);
+            }
             createColision(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y + my_spaceship.height / 2, colision_image[1]);
             tumSoundPlayUserSample("explosion.wav");
             vResetSpaceship();
@@ -1288,7 +1311,8 @@ void vCheckBulletColision(void)
                             && my_bullet[k].x <= my_mothergunship.x + my_mothergunship.width
                             && my_mothergunship.alive 
                             && my_bullet[k].type == SPACESHIP_BULLET) {
-            vKillMothergunship();
+            if (my_player.n_players == 1)
+                vKillMothergunship();
             xSemaphoreTake(my_player.lock, portMAX_DELAY);
             my_player.score1 = my_player.score1 + 50 * (rand() % 4 + 1);
             xSemaphoreGive(my_player.lock);
@@ -1379,6 +1403,35 @@ void vCheckPlayerDead(void)
     }
 }
 
+int vIsMothergunshipInBoundsLeft(void)
+{
+    if (my_mothergunship.x > 0)
+        return 1;
+    
+    return 0;
+}
+
+int vIsMothergunshipInBoundsRight(void)
+{
+    if (my_mothergunship.x + my_mothergunship.width < SCREEN_WIDTH)
+        return 1;
+    
+    return 0;
+}
+
+void vUpdateMothergunshipPositionPVP(void)
+{
+    if (my_mothergunship.alive) {
+        xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
+        if (my_mothergunship.direction == LEFT_TO_RIGHT && vIsMothergunshipInBoundsRight())
+            my_mothergunship.x = my_mothergunship.x + 1;
+            
+        if (my_mothergunship.direction == RIGHT_TO_LEFT && vIsMothergunshipInBoundsLeft())
+            my_mothergunship.x = my_mothergunship.x - 1;
+        xSemaphoreGive(my_mothergunship.lock);
+    }
+}
+
 void vUpdateMothergunshipPosition(void)
 {
     if (my_mothergunship.alive) {
@@ -1402,15 +1455,19 @@ reset_mothergunship:
     return;
 }
 
-int vSpaceshipBulletActive(void)
+int vSpaceshipBulletActive(char bullet_state[12])
 {
     bullet_t my_bullet[MAX_OBJECTS];
     int bullet_active = 0, n_bullets, i = 0;
 
+    strcpy(bullet_state, "PASSIVE");
+
     while(uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
-        if (my_bullet[i].type == SPACESHIP_BULLET)
+        if (my_bullet[i].type == SPACESHIP_BULLET) {
             bullet_active = 1;
+            strcpy(bullet_state, "ATTACKING");
+        }
         i++;
     }
 
@@ -1479,13 +1536,27 @@ void vCheckMothergunshipDifficultyChange(void)
 
 void vGameLogic(void *pvParameters)
 {
+    char bullet_state_tosend[2][12] = {"ATTACKING", "PASSIVE"};
+    char bullet_state[12] = "PASSIVE";
+    char prev_bullet_state[12] = "PASSIVE";
+    int i = 0;
+
+    int prev_spaceship_location = 0;
+    TickType_t lastTimeSend = xTaskGetTickCount();
+
 	while (1) {
         xGetButtonInput();
         vCheckKeyboardInput();
+
         vUpdateBulletPosition();
-        vUpdateMothergunshipPosition();
+        if (my_player.n_players == 1)
+            vUpdateMothergunshipPosition();
+        else
+            vUpdateMothergunshipPositionPVP();
+
         vCheckBulletColision();
-        if (tumEventGetMouseLeft() && !vSpaceshipBulletActive()) {
+        vSpaceshipBulletActive(bullet_state);
+        if (tumEventGetMouseLeft() && strcmp(bullet_state, "PASSIVE") == 0) {
             vShootBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y, SPACESHIP_BULLET);
             tumSoundPlayUserSample("shoot.wav");
         }
@@ -1493,12 +1564,22 @@ void vGameLogic(void *pvParameters)
         vCheckPlayerDead();
         vCheckPauseInput();
         if (my_player.n_players == 2) {
-            vSendPlayerLocation();
-            if (vSpaceshipBulletActive()) {
-                vSendPlayerBulletState("ATTACKING");
-            } else {
-                vSendPlayerBulletState("PASSIVE");
+            if (my_spaceship.x != prev_spaceship_location && xTaskGetTickCount() - lastTimeSend > pdMS_TO_TICKS(500)) {
+                vSendPlayerLocation();
+                prev_spaceship_location = my_spaceship.x;
+                lastTimeSend = xTaskGetTickCount();
             }
+
+            if (strcmp(bullet_state, prev_bullet_state) != 0) {
+                if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)bullet_state_tosend[i], strlen(bullet_state_tosend[i]))) {
+                    PRINT_ERROR("Failed to difficulty change to opponent");
+                } else {
+                    prints("Sent bullet state change (%s) to opponent\n", bullet_state_tosend[i]);
+                }
+                strcpy(prev_bullet_state, bullet_state);
+                i = !i;
+            }
+
             vCheckMothergunshipDifficultyChange();
         }
         vTaskDelay(pdMS_TO_TICKS(8));
@@ -1626,8 +1707,13 @@ void vMonsterBulletShooter(void *pvParameters) {
         if (i == -1)
             continue;
 
-        vShootBullet(my_monsters.monster[shooter_row][shooter_column].x + my_monsters.monster[shooter_row][shooter_column].width / 2,
-                     my_monsters.monster[shooter_row][shooter_column].y + my_monsters.monster[shooter_row][shooter_column].height, MONSTER_BULLET);
+        vShootBullet(my_monsters.monster[shooter_row][shooter_column].x 
+                     + my_monsters.monster[shooter_row][shooter_column].width / 2,
+                     my_monsters.monster[shooter_row][shooter_column].y 
+                     + my_monsters.monster[shooter_row][shooter_column].height, MONSTER_BULLET);
+        if (my_player.n_players == 2)
+            vShootBullet(my_mothergunship.x + my_mothergunship.width / 2,
+             my_mothergunship.y + my_mothergunship.height, MOTHERGUNSHIP_BULLET);
         vTaskDelay(pdMS_TO_TICKS(2500));
     }
 }
@@ -1775,15 +1861,20 @@ void vReceiveCallback(size_t receive_size, char *buffer, void *args)
 
     if (xQueuePeek(CurrentStateQueue, &current_state, 0) == pdTRUE) {
         if (current_state == GAME && my_player.n_players == 2) {
+            xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
             if (strcmp(buffer, "INC") == 0) {
+                my_mothergunship.direction = LEFT_TO_RIGHT;
                 prints("Received order to increment position\n");
             }
             if (strcmp(buffer, "DEC") == 0) {
+                my_mothergunship.direction = RIGHT_TO_LEFT;
                 prints("Received order to decrement position\n");
             }
             if (strcmp(buffer, "HALT") == 0) {
+                my_mothergunship.direction = STOP;
                 prints("Received order to stop\n");
             }
+            xSemaphoreGive(my_mothergunship.lock);
         }
     }
 }
