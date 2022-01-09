@@ -422,6 +422,8 @@ void vResetMothergunship(void)
         my_mothergunship.x = -1 * my_mothergunship.width;
     if (my_mothergunship.direction == RIGHT_TO_LEFT)
         my_mothergunship.x = SCREEN_WIDTH;
+    if (my_mothergunship.direction == STOP)
+        my_mothergunship.direction = LEFT_TO_RIGHT;
     my_mothergunship.alive = 1;
     xSemaphoreGive(my_mothergunship.lock);
     xTimerChangePeriod(xMothergunshipTimer, ORIGINAL_TIMER, portMAX_DELAY);
@@ -588,31 +590,6 @@ void checkDraw(unsigned char status, const char *msg)
 	}
 }
 
-/*
- * Changes the state, either forwards of backwards
- */
-void changeState(volatile unsigned char *state, unsigned char forwards)
-{
-	switch (forwards) {
-	case NEXT_TASK:
-		if (*state == STATE_COUNT - 1) {
-			*state = 0;
-		} else {
-			(*state)++;
-		}
-		break;
-	case PREV_TASK:
-		if (*state == 0) {
-			*state = STATE_COUNT - 1;
-		} else {
-			(*state)--;
-		}
-		break;
-	default:
-		break;
-	}
-}
-
 void xGetButtonInput(void)
 {
 	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
@@ -674,7 +651,6 @@ static int vCheckStateInput(void)
 		}
 		xSemaphoreGive(buttons.lock);
 	}
-
 	return 0;
 }
 
@@ -813,6 +789,31 @@ void vTaskSuspender()
     }
 }
 
+/*
+ * Changes the state, either forwards of backwards
+ */
+void changeState(volatile unsigned char *state, unsigned char forwards)
+{
+	switch (forwards) {
+	case NEXT_TASK:
+		if (*state == STATE_COUNT - 1) {
+			*state = 0;
+		} else {
+			(*state)++;
+		}
+		break;
+	case PREV_TASK:
+		if (*state == 0) {
+			*state = STATE_COUNT - 1;
+		} else {
+			(*state)--;
+		}
+		break;
+	default:
+		break;
+	}
+}
+
 void basicSequentialStateMachine(void *pvParameters)
 {
 	unsigned char current_state = STARTING_STATE; // Default state
@@ -858,7 +859,8 @@ void basicSequentialStateMachine(void *pvParameters)
                 if (prev_state == GAME) {
                     vResetGameBoard();
                     vResetPlayer();
-                    xTimerStop(xMothergunshipTimer, portMAX_DELAY);
+                    if (my_player.n_players == 1)
+                        xTimerStop(xMothergunshipTimer, portMAX_DELAY);
                     prints("Match exited.\n");
                 }
 				if (MenuDrawer) {
@@ -867,8 +869,10 @@ void basicSequentialStateMachine(void *pvParameters)
 				break;
 			case GAME:
                 if (prev_state == MENU || prev_state == current_state) {
-                    if (my_player.n_players == 1)
+                    if (my_player.n_players == 1) {
+                        vKillMothergunship();
                         xTimerReset(xMothergunshipTimer, portMAX_DELAY);
+                    }
                     prints("Match started! Good luck and Have fun!\n");
                     if (my_player.n_players == 2) {
                         vSetUpMothergunshipPVP();
@@ -876,7 +880,8 @@ void basicSequentialStateMachine(void *pvParameters)
                     }
                 }
                 if (prev_state == PAUSE) {
-                    xTimerChangePeriod(xMothergunshipTimer, ORIGINAL_TIMER - timer_elapsed, portMAX_DELAY);
+                    if (my_player.n_players == 1)
+                        xTimerChangePeriod(xMothergunshipTimer, ORIGINAL_TIMER - timer_elapsed, portMAX_DELAY);
                     prints("Game unpaused.\n");
                 }
 				if (GameDrawer) {
@@ -988,18 +993,19 @@ void vDrawMenuText(void)
 {
     vDrawScores();
     if (my_player.credits && my_player.n_players) {
-        vDrawText("PLAY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 - 10, CENTERING);
-        vDrawText("SPACE INVADERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 + DEFAULT_FONT_SIZE * 1.5 - 10, CENTERING);
+        vDrawText("SPACE INVADERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 - 30, CENTERING);
+        vDrawText("[M]: PLAY/QUIT", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4  + DEFAULT_FONT_SIZE * 1.5 - 30, CENTERING);
+        vDrawText("[P]: PAUSE/UNPAUSE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 + DEFAULT_FONT_SIZE * 3 - 30, CENTERING);
 
-        vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
-        checkDraw(tumDrawLoadedImage(mothergunship_image, SCREEN_WIDTH / 5 - 5, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 3), __FUNCTION__);
-        vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 3, CENTERING);
-        checkDraw(tumDrawSprite(monster_spritesheet[0], 0, 0, SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 4.5), __FUNCTION__);
-        vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 4.5, CENTERING);
-        checkDraw(tumDrawSprite(monster_spritesheet[1], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 6), __FUNCTION__);
-        vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 6, CENTERING);
-        checkDraw(tumDrawSprite(monster_spritesheet[2], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 7.5), __FUNCTION__);
-        vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 7.5, CENTERING);
+        vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 1.5 + 10, CENTERING);
+        checkDraw(tumDrawLoadedImage(mothergunship_image, SCREEN_WIDTH / 5 - 5, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 3 + 10), __FUNCTION__);
+        vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 3 + 10, CENTERING);
+        checkDraw(tumDrawSprite(monster_spritesheet[0], 0, 0, SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 4.5 + 10), __FUNCTION__);
+        vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 4.5 + 10, CENTERING);
+        checkDraw(tumDrawSprite(monster_spritesheet[1], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 6 + 10), __FUNCTION__);
+        vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 6 + 10, CENTERING);
+        checkDraw(tumDrawSprite(monster_spritesheet[2], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 7.5 + 10), __FUNCTION__);
+        vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 7.5 + 10, CENTERING);
 
         vDrawText("[I]NFINITE LIVES", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4, CENTERING);
         vDrawText("STARTING [S]CORE", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
@@ -1278,7 +1284,6 @@ void vCheckBulletColision(void)
                 }
             }
         }
-
 
         if (my_bullet[k].y + BULLET_HEIGHT >= GREEN_LINE_Y 
                             && (my_bullet[k].type == MONSTER_BULLET || my_bullet[k].type == MOTHERGUNSHIP_BULLET)) {
@@ -1806,6 +1811,22 @@ void vMonsterMover(void *pvParameters)
     }
 }
 
+void vDrawPauseText(void)
+{
+    vDrawText("PAUSED", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 5, CENTERING);
+
+    vDrawText("[A] AND [D] TO MOVE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 + 25, CENTERING);
+    vDrawText("LEFT CLICK TO SHOOT", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 + DEFAULT_FONT_SIZE * 1.5 + 25, CENTERING);
+
+    if (my_player.n_players == 2) {
+        vDrawText("MOTHERGUNSHIP", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 20, CENTERING);
+        vDrawText("DIFFICULTY:", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + + DEFAULT_FONT_SIZE * 1.5 + 20, CENTERING);
+        vDrawText("[1] EASY", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3, CENTERING);
+        vDrawText("[2] MEDIUM", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
+        vDrawText("[3] HARD", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3 + DEFAULT_FONT_SIZE * 3, CENTERING);
+    }
+}
+
 void vPauseDrawer(void *pvParameters)
 {
 	while (1) {
@@ -1815,7 +1836,7 @@ void vPauseDrawer(void *pvParameters)
         xGetButtonInput();
 		xSemaphoreTake(ScreenLock, portMAX_DELAY);
 		checkDraw(tumDrawClear(BACKGROUND_COLOUR), __FUNCTION__);
-        vDrawText("PAUSED", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
+        vDrawPauseText();
 		xSemaphoreGive(ScreenLock);
         vCheckPauseInput();
 	}
