@@ -20,18 +20,6 @@
 
 #include "text.h"
 
-void checkDraw(unsigned char status, const char *msg)
-{
-	if (status) {
-		if (msg)
-			fprints(stderr, "[ERROR] %s, %s\n", msg,
-				tumGetErrorMessage());
-		else {
-			fprints(stderr, "[ERROR] %s\n", tumGetErrorMessage());
-		}
-	}
-}
-
 void vAddSpaces(char *str)
 {
     int index = 0;

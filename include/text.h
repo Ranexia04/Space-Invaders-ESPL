@@ -6,7 +6,7 @@
 
 #define TEXT_COLOUR White
 
-void checkDraw(unsigned char status, const char *msg);
+extern void checkDraw(unsigned char status, const char *msg);
 
 void vAddSpaces(char *str);
 
