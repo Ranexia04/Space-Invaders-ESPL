@@ -9,6 +9,8 @@
 #define SPACESHIP_Y SCREEN_HEIGHT - 75
 #define CHANGE_IN_POSITION 1
 
+#define MAX_OBJECTS 10
+
 #define BULLET_HEIGHT 8
 #define SPACESHIP_BULLET 0
 #define MONSTER_BULLET 1
@@ -149,6 +151,8 @@ typedef struct bunker_grid {
 
 extern TimerHandle_t xMothergunshipTimer;
 
+extern QueueHandle_t BulletQueue;
+extern QueueHandle_t ColisionQueue;
 extern QueueHandle_t MonsterDelayQueue;
 extern QueueHandle_t TimerStartingQueue;
 
@@ -168,6 +172,16 @@ void vInsertCoin(void);
 
 void vUseCoin(void);
 
+void vUpdateAIScore(void);
+
+void vPlayerGetHit(void);
+
+void vUpdatePlayerScoreRandom(void);
+
+void vUpdatePlayerScore(int i, int j);
+
+void vSetPlayerNumber(int n_players);
+
 void vResetPlayer(void);
 
 void vInitPlayer(void);
@@ -184,7 +198,15 @@ void vResetSpaceship(void);
 
 void vInitSpaceship(image_handle_t spaceship_image);
 
+void vUpdateBulletPosition(void);
+
+void vShootBullet(int initial_x, int initial_y, int type);
+
+void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer);
+
 void vPlayMonsterSound(void *args);
+
+void vKillMonster(int i, int j);
 
 void vResetMonsters(void);
 
@@ -214,8 +236,12 @@ void vUpdateMothergunshipPosition(void);
 
 void vInitMothergunship(image_handle_t mothergunship_image);
 
+void vBunkerGetHit(int a, int i, int j);
+
 void vResetBunkers(void);
 
 void vInitBunkers(image_handle_t *bunker_image);
+
+void vObjectSemaphoreDelete(void);
 
 #endif

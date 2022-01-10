@@ -20,8 +20,6 @@
 
 #include "objects.h"
 
-
-
 void vInsertCoin(void)
 {
     xSemaphoreTake(my_player.lock, portMAX_DELAY);
@@ -33,6 +31,46 @@ void vUseCoin(void)
 {
     xSemaphoreTake(my_player.lock, portMAX_DELAY);
     my_player.credits--;
+    xSemaphoreGive(my_player.lock);
+}
+
+void vUpdateAIScore(void)
+{
+    xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    my_player.score2 = my_player.score2 + 1000;
+    xSemaphoreGive(my_player.lock);
+}
+
+void vPlayerGetHit(void)
+{
+    xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    my_player.n_lives--;
+    xSemaphoreGive(my_player.lock);
+}
+
+void vUpdatePlayerScoreRandom(void)
+{
+    xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    my_player.score1 = my_player.score1 + 50 * (rand() % 4 + 1);
+    xSemaphoreGive(my_player.lock);
+}
+
+void vUpdatePlayerScore(int i, int j)
+{
+    xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    if (my_monsters.monster[i][j].type == SMALL_MONSTER)
+        my_player.score1 = my_player.score1 + 30;
+    if (my_monsters.monster[i][j].type == MEDIUM_MONSTER)
+        my_player.score1 = my_player.score1 + 20;
+    if (my_monsters.monster[i][j].type == LARGE_MONSTER)
+        my_player.score1 = my_player.score1 + 10;
+    xSemaphoreGive(my_player.lock);
+}
+
+void vSetPlayerNumber(int n_players)
+{
+    xSemaphoreTake(my_player.lock, portMAX_DELAY);
+    my_player.n_players = n_players;
     xSemaphoreGive(my_player.lock);
 }
 
@@ -121,9 +159,76 @@ void vInitSpaceship(image_handle_t spaceship_image)
     my_spaceship.lock = xSemaphoreCreateMutex();
 }
 
+#define BULLET_CHANGE 3
+
+void vUpdateBulletPosition(void)
+{
+    int i = 0, n_bullets;
+    bullet_t my_bullet[MAX_OBJECTS];
+
+    while (uxQueueMessagesWaiting(BulletQueue)) {
+        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
+        if (my_bullet[i].type == SPACESHIP_BULLET)
+            my_bullet[i].y = my_bullet[i].y - BULLET_CHANGE;
+        if (my_bullet[i].type == MONSTER_BULLET || my_bullet[i].type == MOTHERGUNSHIP_BULLET)
+            my_bullet[i].y = my_bullet[i].y + BULLET_CHANGE;
+        i++;
+    }
+
+    n_bullets = i;
+    for (i = 0; i < n_bullets; i++) {
+        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
+    }
+}
+
+void vShootBullet(int initial_x, int initial_y, int type)
+{
+    bullet_t my_bullet;
+
+    my_bullet.x = initial_x;
+    my_bullet.y = initial_y;
+    my_bullet.width = 1;
+    my_bullet.height = BULLET_HEIGHT;
+    my_bullet.type = type;
+    if (my_bullet.type == SPACESHIP_BULLET)
+        my_bullet.colour = Green;
+    if (my_bullet.type == MONSTER_BULLET)
+        my_bullet.colour = White;
+    if (my_bullet.type == MOTHERGUNSHIP_BULLET)
+        my_bullet.colour = Red;
+
+    xQueueSend(BulletQueue, &my_bullet, portMAX_DELAY);
+}
+
+void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer)
+{
+    colision_t my_colision;
+
+    my_colision.image = image_buffer;
+    if (my_colision.image != NULL) {
+        my_colision.width = tumDrawGetLoadedImageWidth(my_colision.image);
+        my_colision.height = tumDrawGetLoadedImageHeight(my_colision.image);
+    } else {
+        my_colision.width = 0;
+        my_colision.height = 0;
+    }
+    my_colision.x = bullet_x - my_colision.width / 2;
+    my_colision.y = bullet_y - my_colision.height / 2;
+    my_colision.frame_number = 0;
+
+    xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
+}
+
 void vPlayMonsterSound(void *args)
 {
     tumSoundPlayUserSample("fastinvader1.wav");
+}
+
+void vKillMonster(int i, int j)
+{
+    xSemaphoreTake(my_monsters.lock, portMAX_DELAY);
+    my_monsters.monster[i][j].alive = 0;
+    xSemaphoreGive(my_monsters.lock);
 }
 
 void vResetMonsters(void)
@@ -310,6 +415,13 @@ void vInitMothergunship(image_handle_t mothergunship_image)
     xQueueOverwrite(TimerStartingQueue, &timer_starting);
 }
 
+void vBunkerGetHit(int a, int i, int j)
+{
+    xSemaphoreTake(my_bunkers.lock, portMAX_DELAY);
+    my_bunkers.bunker[a].component[i][j].damage++;
+    xSemaphoreGive(my_bunkers.lock);
+}
+
 void vResetBunkers(void)
 {
     int i, j, k;
@@ -360,4 +472,14 @@ void vInitBunkers(image_handle_t *bunker_image)
     }
 
     my_bunkers.lock = xSemaphoreCreateMutex();
+}
+
+void vObjectSemaphoreDelete(void)
+{
+    vSemaphoreDelete(my_player.lock);
+    vSemaphoreDelete(saved.lock);
+    vSemaphoreDelete(my_spaceship.lock);
+    vSemaphoreDelete(my_monsters.lock);
+    vSemaphoreDelete(my_mothergunship.lock);
+    vSemaphoreDelete(my_bunkers.lock);
 }

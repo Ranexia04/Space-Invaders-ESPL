@@ -52,8 +52,6 @@
 #define GREEN_LINE_Y SCREEN_HEIGHT - 38
 #define TOP_LINE_Y 75
 
-#define MAX_OBJECTS 10
-
 #define UDP_RECEIVE_PORT 1234
 #define UDP_TRANSMIT_PORT 1235
 #define IPv4_addr "127.0.0.1"
@@ -82,8 +80,8 @@ static StackType_t xStack[STACK_SIZE];
 
 static QueueHandle_t StateChangeQueue = NULL;
 static QueueHandle_t CurrentStateQueue = NULL;
-static QueueHandle_t BulletQueue = NULL;
-static QueueHandle_t ColisionQueue = NULL;
+QueueHandle_t BulletQueue = NULL;
+QueueHandle_t ColisionQueue = NULL;
 QueueHandle_t MonsterDelayQueue = NULL;
 QueueHandle_t TimerStartingQueue = NULL;
 
@@ -635,14 +633,10 @@ void vCheckPlayerSet(void)
 {
     if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
 		if (buttons.buttons[KEYCODE(1)]) {
-			xSemaphoreTake(my_player.lock, portMAX_DELAY);
-            my_player.n_players = 1;
-            xSemaphoreGive(my_player.lock);
+			vSetPlayerNumber(1);
 		}
         if (buttons.buttons[KEYCODE(2)]) {
-			xSemaphoreTake(my_player.lock, portMAX_DELAY);
-            my_player.n_players = 2;
-            xSemaphoreGive(my_player.lock);
+			vSetPlayerNumber(2);
 		}
 		xSemaphoreGive(buttons.lock);
 	}
@@ -671,67 +665,79 @@ void vMenuDrawer(void *pvParameters)
 	}
 }
 
-#define BULLET_CHANGE 3
-
-void vUpdateBulletPosition(void)
+int vCheckBulletHitCeiling(bullet_t my_bullet)
 {
-    int i = 0, n_bullets;
-    bullet_t my_bullet[MAX_OBJECTS];
+    if (my_bullet.y <= TOP_LINE_Y && my_bullet.type == SPACESHIP_BULLET)//bullet exceeded top limit
+        return 1;
 
-    while (uxQueueMessagesWaiting(BulletQueue)) {
-        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
-        if (my_bullet[i].type == SPACESHIP_BULLET)
-            my_bullet[i].y = my_bullet[i].y - BULLET_CHANGE;
-        if (my_bullet[i].type == MONSTER_BULLET || my_bullet[i].type == MOTHERGUNSHIP_BULLET)
-            my_bullet[i].y = my_bullet[i].y + BULLET_CHANGE;
-        i++;
-    }
-
-    n_bullets = i;
-    for (i = 0; i < n_bullets; i++) {
-        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
-    }
+    return 0;
 }
 
-void vShootBullet(int initial_x, int initial_y, int type)
+int vCheckBulletHitMonster(bullet_t my_bullet, int i, int j)
 {
-    bullet_t my_bullet;
+    if (my_bullet.y - BULLET_HEIGHT >= my_monsters.monster[i][j].y
+                && my_bullet.y <= my_monsters.monster[i][j].y + my_monsters.monster[i][j].height
+                && my_bullet.x >= my_monsters.monster[i][j].x
+                && my_bullet.x <= my_monsters.monster[i][j].x + my_monsters.monster[i][j].width
+                && my_monsters.monster[i][j].alive && my_bullet.type == SPACESHIP_BULLET) {
+        return 1;
+    }
 
-    my_bullet.x = initial_x;
-    my_bullet.y = initial_y;
-    my_bullet.width = 1;
-    my_bullet.height = BULLET_HEIGHT;
-    my_bullet.type = type;
-    if (my_bullet.type == SPACESHIP_BULLET)
-        my_bullet.colour = Green;
-    if (my_bullet.type == MONSTER_BULLET)
-        my_bullet.colour = White;
-    if (my_bullet.type == MOTHERGUNSHIP_BULLET)
-        my_bullet.colour = Red;
-
-    xQueueSend(BulletQueue, &my_bullet, portMAX_DELAY);
+    return 0;
 }
 
-#define TOP_COLISION 0
-#define MONSTER_COLISION 1
-
-void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer)
+int vCheckBulletHitFloor(bullet_t my_bullet)
 {
-    colision_t my_colision;
-
-    my_colision.image = image_buffer;
-    if (my_colision.image != NULL) {
-        my_colision.width = tumDrawGetLoadedImageWidth(my_colision.image);
-        my_colision.height = tumDrawGetLoadedImageHeight(my_colision.image);
-    } else {
-        my_colision.width = 0;
-        my_colision.height = 0;
+    if (my_bullet.y + BULLET_HEIGHT >= GREEN_LINE_Y 
+                        && (my_bullet.type == MONSTER_BULLET 
+                        || my_bullet.type == MOTHERGUNSHIP_BULLET)) {
+        return 1;
     }
-    my_colision.x = bullet_x - my_colision.width / 2;
-    my_colision.y = bullet_y - my_colision.height / 2;
-    my_colision.frame_number = 0;
 
-    xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
+    return 0;
+}
+
+int vCheckBulletHitSpaceship(bullet_t my_bullet)
+{
+    if (my_bullet.y + BULLET_HEIGHT >= my_spaceship.y
+                            && my_bullet.y <= my_spaceship.y + my_spaceship.height
+                            && my_bullet.x >= my_spaceship.x
+                            && my_bullet.x <= my_spaceship.x + my_spaceship.width
+                            && (my_bullet.type == MONSTER_BULLET
+                            || my_bullet.type == MOTHERGUNSHIP_BULLET)) {
+        return 1;
+    }
+
+    return 0;
+}
+
+int vCheckBulletHitMothergunship(bullet_t my_bullet)
+{
+    if (my_bullet.y - BULLET_HEIGHT >= my_mothergunship.y
+                            && my_bullet.y <= my_mothergunship.y + my_mothergunship.height
+                            && my_bullet.x >= my_mothergunship.x
+                            && my_bullet.x <= my_mothergunship.x + my_mothergunship.width
+                            && my_mothergunship.alive 
+                            && my_bullet.type == SPACESHIP_BULLET) {
+            return 1;
+    }
+
+    return 0;
+}
+
+int vCheckBulletHitBunker(bullet_t my_bullet, int a, int i, int j)
+{
+    if (my_bunkers.bunker[a].component[i][j].damage < 3
+                    && (my_bullet.y - BULLET_HEIGHT >= my_bunkers.bunker[a].component[i][j].y)
+                    && my_bullet.y <= my_bunkers.bunker[a].component[i][j].y 
+                    + my_bunkers.bunker[a].component[i][j].height
+                    && my_bullet.x >= my_bunkers.bunker[a].component[i][j].x
+                    && my_bullet.x <= my_bunkers.bunker[a].component[i][j].x 
+                    + my_bunkers.bunker[a].component[i][j].width) {
+        return 1;
+    }
+
+    return 0;
 }
 
 void vCheckBulletColision(void)
@@ -741,32 +747,19 @@ void vCheckBulletColision(void)
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &my_bullet[k], portMAX_DELAY);
-        if (my_bullet[k].y <= TOP_LINE_Y && my_bullet[k].type == SPACESHIP_BULLET) {//bullet exceeded top limit
+
+        if (vCheckBulletHitCeiling(my_bullet[k])) {//bullet exceeded top limit
             createColision(my_bullet[k].x, my_bullet[k].y, colision_image[0]);
             goto colision_detected;
         }
 
-
         for (i = 0; i < N_ROWS; i++) {
             for (j = 0; j < N_COLUMNS; j++) {
-                if (my_bullet[k].y - BULLET_HEIGHT >= my_monsters.monster[i][j].y
-                            && my_bullet[k].y <= my_monsters.monster[i][j].y + my_monsters.monster[i][j].height
-                            && my_bullet[k].x >= my_monsters.monster[i][j].x
-                            && my_bullet[k].x <= my_monsters.monster[i][j].x + my_monsters.monster[i][j].width
-                            && my_monsters.monster[i][j].alive && my_bullet[k].type == SPACESHIP_BULLET) {
-                    xSemaphoreTake(my_player.lock, portMAX_DELAY);//TALVEZ FAZER FUNÇÃO QUE DEIA REPLACE NESTE BLOCO PARA FICAR MAIS FACIL DE LER
-                    if (my_monsters.monster[i][j].type == SMALL_MONSTER)
-                        my_player.score1 = my_player.score1 + 30;
-                    if (my_monsters.monster[i][j].type == MEDIUM_MONSTER)
-                        my_player.score1 = my_player.score1 + 20;
-                    if (my_monsters.monster[i][j].type == LARGE_MONSTER)
-                        my_player.score1 = my_player.score1 + 10;
-                    xSemaphoreGive(my_player.lock);
+                if (vCheckBulletHitMonster(my_bullet[k], i, j)) {
+                    vUpdatePlayerScore(i, j);
                     createColision(my_monsters.monster[i][j].x + my_monsters.monster[i][j].width / 2, 
                                             my_monsters.monster[i][j].y + my_monsters.monster[i][j].height / 2, colision_image[1]);
-                    xSemaphoreTake(my_monsters.lock, portMAX_DELAY);
-                    my_monsters.monster[i][j].alive = 0;
-                    xSemaphoreGive(my_monsters.lock);
+                    vKillMonster(i, j);
                     tumSoundPlayUserSample("invaderkilled.wav");
                     vDecreaseMonsterDelay();
                     goto colision_detected;
@@ -774,57 +767,38 @@ void vCheckBulletColision(void)
             }
         }
 
-        if (my_bullet[k].y + BULLET_HEIGHT >= GREEN_LINE_Y 
-                            && (my_bullet[k].type == MONSTER_BULLET || my_bullet[k].type == MOTHERGUNSHIP_BULLET)) {
-            createColision(my_bullet[k].x, my_bullet[k].y + BULLET_HEIGHT, colision_image[0]);
+        if (vCheckBulletHitFloor(my_bullet[k])) {
+            createColision(my_bullet[k].x, my_bullet[k].y + BULLET_HEIGHT,
+                             colision_image[0]);
             goto colision_detected;
         }
 
-        if (my_bullet[k].y + BULLET_HEIGHT >= my_spaceship.y
-                            && my_bullet[k].y <= my_spaceship.y + my_spaceship.height
-                            && my_bullet[k].x >= my_spaceship.x
-                            && my_bullet[k].x <= my_spaceship.x + my_spaceship.width
-                            && (my_bullet[k].type == MONSTER_BULLET || my_bullet[k].type == MOTHERGUNSHIP_BULLET)) {
-            xSemaphoreTake(my_player.lock, portMAX_DELAY);
-            my_player.n_lives--;
-            xSemaphoreGive(my_player.lock);
+        if (vCheckBulletHitSpaceship(my_bullet[k])) {
+            vPlayerGetHit();
             if (my_bullet[k].type == MOTHERGUNSHIP_BULLET) {
-                xSemaphoreTake(my_player.lock, portMAX_DELAY);
-                my_player.score2 = my_player.score2 + 1000;
-                xSemaphoreGive(my_player.lock);
+                vUpdateAIScore();
             }
-            createColision(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y + my_spaceship.height / 2, colision_image[1]);
+            createColision(my_spaceship.x + my_spaceship.width / 2,
+                     my_spaceship.y + my_spaceship.height / 2, colision_image[1]);
             tumSoundPlayUserSample("explosion.wav");
             vResetSpaceship();
             goto colision_detected;
         }
 
-        if (my_bullet[k].y - BULLET_HEIGHT >= my_mothergunship.y
-                            && my_bullet[k].y <= my_mothergunship.y + my_mothergunship.height
-                            && my_bullet[k].x >= my_mothergunship.x
-                            && my_bullet[k].x <= my_mothergunship.x + my_mothergunship.width
-                            && my_mothergunship.alive 
-                            && my_bullet[k].type == SPACESHIP_BULLET) {
+        if (vCheckBulletHitMothergunship(my_bullet[k])) {
             if (my_player.n_players == 1)
                 vKillMothergunship();
-            xSemaphoreTake(my_player.lock, portMAX_DELAY);
-            my_player.score1 = my_player.score1 + 50 * (rand() % 4 + 1);
-            xSemaphoreGive(my_player.lock);
-            createColision(my_mothergunship.x + my_mothergunship.width / 2, my_mothergunship.y + my_mothergunship.height / 2, colision_image[1]);
+            vUpdatePlayerScoreRandom();
+            createColision(my_mothergunship.x + my_mothergunship.width / 2, 
+                    my_mothergunship.y + my_mothergunship.height / 2, colision_image[1]);
             goto colision_detected;
         }
 
         for (a = 0; a < N_BUNKERS; a++) {
             for (i = 0; i < 2; i++) {
                 for (j = 0; j < 3; j++) {
-                    if (my_bunkers.bunker[a].component[i][j].damage < 3
-                         && (my_bullet[k].y - BULLET_HEIGHT >= my_bunkers.bunker[a].component[i][j].y)
-                         && my_bullet[k].y <= my_bunkers.bunker[a].component[i][j].y + my_bunkers.bunker[a].component[i][j].height
-                         && my_bullet[k].x >= my_bunkers.bunker[a].component[i][j].x
-                         && my_bullet[k].x <= my_bunkers.bunker[a].component[i][j].x + my_bunkers.bunker[a].component[i][j].width) {
-                        xSemaphoreTake(my_bunkers.lock, portMAX_DELAY);
-                        my_bunkers.bunker[a].component[i][j].damage++;
-                        xSemaphoreGive(my_bunkers.lock);
+                    if (vCheckBulletHitBunker(my_bullet[k], a, i, j)) {
+                        vBunkerGetHit(a, i, j);
                         createColision(my_bullet[k].x, my_bullet[k].y, NULL);
                         goto colision_detected;
                     }
@@ -921,35 +895,8 @@ int vSpaceshipBulletActive(char bullet_state[12])
     return bullet_active;
 }
 
-void vSendPlayerLocation(void)
+void vSendDifficultyChange(char *tosend)
 {
-    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)&my_spaceship.x, sizeof(my_spaceship.x))) {
-        PRINT_ERROR("Failed to send position to opponent");
-    } else {
-        prints("Sent position to opponent\n");
-    }
-}
-
-void vSendPlayerBulletState(char tosend[12])
-{
-    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)tosend, strlen(tosend))) {
-        PRINT_ERROR("Failed to bullet state to opponent");
-    } else {
-        prints("Sent bullet state (%s) to opponent\n", tosend);
-    }
-}
-
-void vSendDifficultyChange(int difficulty)
-{
-    char tosend[3];
-
-    if (difficulty == 1)
-        strcpy(tosend, "D1");
-    if (difficulty == 2)
-        strcpy(tosend, "D2");
-    if (difficulty == 3)
-        strcpy(tosend, "D3");
-
     if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)tosend, strlen(tosend))) {
         PRINT_ERROR("Failed to difficulty change to opponent");
     } else {
@@ -962,29 +909,66 @@ void vCheckMothergunshipDifficultyChange(void)
     if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
 		if (buttons.buttons[KEYCODE(1)]) {
 			buttons.buttons[KEYCODE(1)] = 0;
-            vSendDifficultyChange(1);
+            vSendDifficultyChange("D1");
         }
         if (buttons.buttons[KEYCODE(2)]) {
 			buttons.buttons[KEYCODE(2)] = 0;
-            vSendDifficultyChange(2);
+            vSendDifficultyChange("D2");
         }
         if (buttons.buttons[KEYCODE(3)]) {
 			buttons.buttons[KEYCODE(3)] = 0;
-            vSendDifficultyChange(3);
+            vSendDifficultyChange("D3");
         }
 		xSemaphoreGive(buttons.lock);
 	}
 }
 
-void vGameLogic(void *pvParameters)
+void vSendSpaceshipLocation(void)
+{
+    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)&my_spaceship.x, sizeof(my_spaceship.x))) {
+        PRINT_ERROR("Failed to send position to opponent");
+    } else {
+        prints("Sent position to opponent\n");
+    }
+}
+
+void vCheckSendSpaceshipLocation(void)
+{
+    static int prev_spaceship_location = 0;
+    static TickType_t lastTimeSend = 0;
+
+    if (my_spaceship.x != prev_spaceship_location && xTaskGetTickCount() - lastTimeSend > pdMS_TO_TICKS(500)) {
+        vSendSpaceshipLocation();
+        prev_spaceship_location = my_spaceship.x;
+        lastTimeSend = xTaskGetTickCount();
+    }
+}
+
+void vSendBulletState(char *bullet_state_tosend)
+{
+    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)bullet_state_tosend, strlen(bullet_state_tosend))) {
+        PRINT_ERROR("Failed to difficulty change to opponent");
+    } else {
+        prints("Sent bullet state change (%s) to opponent\n", bullet_state_tosend);
+    }
+}
+
+void vCheckSendBulletState(char *bullet_state)
 {
     char bullet_state_tosend[2][12] = {"ATTACKING", "PASSIVE"};
-    char bullet_state[12] = "PASSIVE";
-    char prev_bullet_state[12] = "PASSIVE";
-    int i = 0;
+    static char prev_bullet_state[12] = "PASSIVE";
+    static int i = 0;
 
-    int prev_spaceship_location = 0;
-    TickType_t lastTimeSend = xTaskGetTickCount();
+    if (strcmp(bullet_state, prev_bullet_state) != 0) {
+        vSendBulletState(bullet_state_tosend[i]);
+        strcpy(prev_bullet_state, bullet_state);
+        i = !i;
+    }
+}
+
+void vGameLogic(void *pvParameters)
+{
+    char bullet_state[12] = "PASSIVE";
 
 	while (1) {
         xGetButtonInput();
@@ -997,33 +981,23 @@ void vGameLogic(void *pvParameters)
             vUpdateMothergunshipPositionPVP();
 
         vCheckBulletColision();
+
         vSpaceshipBulletActive(bullet_state);
         if (tumEventGetMouseLeft() && strcmp(bullet_state, "PASSIVE") == 0) {
             vShootBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y, SPACESHIP_BULLET);
             tumSoundPlayUserSample("shoot.wav");
         }
+
+        if (my_player.n_players == 2) {
+            vCheckSendSpaceshipLocation();
+            vCheckSendBulletState(bullet_state);
+            vCheckMothergunshipDifficultyChange();
+        }
+
         vCheckMonstersDead();
         vCheckPlayerDead();
         vCheckPauseInput();
-        if (my_player.n_players == 2) {
-            if (my_spaceship.x != prev_spaceship_location && xTaskGetTickCount() - lastTimeSend > pdMS_TO_TICKS(500)) {
-                vSendPlayerLocation();
-                prev_spaceship_location = my_spaceship.x;
-                lastTimeSend = xTaskGetTickCount();
-            }
 
-            if (strcmp(bullet_state, prev_bullet_state) != 0) {
-                if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)bullet_state_tosend[i], strlen(bullet_state_tosend[i]))) {
-                    PRINT_ERROR("Failed to difficulty change to opponent");
-                } else {
-                    prints("Sent bullet state change (%s) to opponent\n", bullet_state_tosend[i]);
-                }
-                strcpy(prev_bullet_state, bullet_state);
-                i = !i;
-            }
-
-            vCheckMothergunshipDifficultyChange();
-        }
         vTaskDelay(pdMS_TO_TICKS(8));
 	}
 }
@@ -1156,6 +1130,7 @@ void vMonsterBulletShooter(void *pvParameters) {
         if (my_player.n_players == 2)
             vShootBullet(my_mothergunship.x + my_mothergunship.width / 2,
              my_mothergunship.y + my_mothergunship.height, MOTHERGUNSHIP_BULLET);
+
         vTaskDelay(pdMS_TO_TICKS(2500));
     }
 }
@@ -1531,6 +1506,7 @@ int main(int argc, char *argv[])
 
     atexit(vSaveHighScore);
     atexit(aIODeinit);
+    atexit(vObjectSemaphoreDelete);
 
     vInitImages();
     vInitSpriteSheets();
