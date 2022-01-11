@@ -205,6 +205,15 @@ void vUpdateBulletPosition(void)
     }
 }
 
+void vResetBulletQueue(void)
+{
+    bullet_t bullet;
+
+    while (uxQueueMessagesWaiting(BulletQueue)) {
+        xQueueReceive(BulletQueue, &bullet, portMAX_DELAY);
+    }
+}
+
 void vShootBullet(int initial_x, int initial_y, int type)
 {
     bullet_t my_bullet;
@@ -222,6 +231,15 @@ void vShootBullet(int initial_x, int initial_y, int type)
         my_bullet.colour = Red;
 
     xQueueSend(BulletQueue, &my_bullet, portMAX_DELAY);
+}
+
+void vResetColisionQueue(void)
+{
+    colision_t colision;
+
+    while (uxQueueMessagesWaiting(ColisionQueue)) {
+        xQueueReceive(ColisionQueue, &colision, portMAX_DELAY);
+    }
 }
 
 void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer)

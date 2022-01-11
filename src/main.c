@@ -126,24 +126,6 @@ void checkDraw(unsigned char status, const char *msg)
 	}
 }
 
-void vResetBulletQueue(void)
-{
-    bullet_t bullet;
-
-    while (uxQueueMessagesWaiting(BulletQueue)) {
-        xQueueReceive(BulletQueue, &bullet, portMAX_DELAY);
-    }
-}
-
-void vResetColisionQueue(void)
-{
-    colision_t colision;
-
-    while (uxQueueMessagesWaiting(ColisionQueue)) {
-        xQueueReceive(ColisionQueue, &colision, portMAX_DELAY);
-    }
-}
-
 void vCheckCoinInput(void)
 {
     static int debounce_flag = 0;
@@ -186,27 +168,32 @@ void xGetButtonInput(void)
 	}
 }
 
-static int vCheckPauseInput(void)
+void vPauseOrUnpauseGame(void)
 {
     unsigned char current_state;
 
+    if (xQueuePeek(CurrentStateQueue, &current_state, 0) ==
+		pdTRUE) {
+            if (current_state == GAME) {
+                xQueueSend(StateChangeQueue, &next_state_signal, 0);
+            } else if (current_state == PAUSE) {
+                xQueueSend(StateChangeQueue, &prev_state_signal, 0);
+            }
+	}
+}
+
+static int vCheckPauseInput(void)
+{
 	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
 		if (buttons.buttons[KEYCODE(P)]) {
 			buttons.buttons[KEYCODE(P)] = 0;
 			if (StateChangeQueue) {
 				xSemaphoreGive(buttons.lock);
-                if (xQueuePeek(CurrentStateQueue, &current_state, 0) ==
-			    pdTRUE) {
-                    if (current_state == GAME) {
-                        xQueueSend(StateChangeQueue, &next_state_signal, 0);
-                    } else if (current_state == PAUSE) {
-                        xQueueSend(StateChangeQueue, &prev_state_signal, 0);
-                    }
-				}
-				return 0;
+                vPauseOrUnpauseGame();
+				return 1;
 			}
 			xSemaphoreGive(buttons.lock);
-			return -1;
+			return 0;
 		}
 		xSemaphoreGive(buttons.lock);
 	}
@@ -214,28 +201,33 @@ static int vCheckPauseInput(void)
 	return 0;
 }
 
-static int vCheckStateInput(void)
+void vPlayOrQuitGame(void)
 {
     unsigned char current_state;
 
+    if (xQueuePeek(CurrentStateQueue, &current_state, 0) ==
+			            pdTRUE) {
+        if (current_state == MENU && my_player.credits > 0) {
+            vUseCoin();
+            xQueueSend(StateChangeQueue, &next_state_signal, 0);
+        } else if (current_state == GAME) {
+            xQueueSend(StateChangeQueue, &prev_state_signal, 0);
+        }
+	}
+}
+
+static int vCheckStateInput(void)
+{
 	if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
 		if (buttons.buttons[KEYCODE(M)]) {
 			buttons.buttons[KEYCODE(M)] = 0;
 			if (StateChangeQueue) {
 				xSemaphoreGive(buttons.lock);
-                if (xQueuePeek(CurrentStateQueue, &current_state, 0) ==
-			    pdTRUE) {
-                    if (current_state == MENU && my_player.credits > 0) {
-                        vUseCoin();
-                        xQueueSend(StateChangeQueue, &next_state_signal, 0);
-                    } else if (current_state == GAME) {
-                        xQueueSend(StateChangeQueue, &prev_state_signal, 0);
-                    }
-				}
-				return 0;
+                vPlayOrQuitGame();
+				return 1;
 			}
 			xSemaphoreGive(buttons.lock);
-			return -1;
+			return 0;
 		}
 		xSemaphoreGive(buttons.lock);
 	}
@@ -812,7 +804,16 @@ void vCheckBulletColision(void)
     for (k = 0; k < n_bullets; k++) {
         xQueueSend(BulletQueue, &my_bullet[k], portMAX_DELAY);
     }
-    
+}
+
+void vResetGame(void)
+{
+    vTaskSuspend(GameDrawer);
+    vTaskSuspend(EnemyBulletShooter);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    vResetGameBoard();
+    vTaskResume(GameDrawer);
+    vTaskResume(EnemyBulletShooter);
 }
 
 void vCheckMonstersDead(void)
@@ -827,12 +828,7 @@ void vCheckMonstersDead(void)
     }
 
     if (!n_monster_alive) {
-        vTaskSuspend(GameDrawer);
-        vTaskSuspend(EnemyBulletShooter);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        vResetGameBoard();
-        vTaskResume(GameDrawer);
-        vTaskResume(EnemyBulletShooter);
+        vResetGame();
     }
 }
 
@@ -856,13 +852,8 @@ int vCheckMonstersInvaded(void)
 void vCheckPlayerDead(void)
 {
     if (!my_player.n_lives || vCheckMonstersInvaded()) {
-        vTaskSuspend(GameDrawer);
-        vTaskSuspend(EnemyBulletShooter);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        vResetGameBoard();
         vResetPlayer();
-        vTaskResume(GameDrawer);
-        vTaskResume(EnemyBulletShooter);
+        vResetGame();
     }
 }
 

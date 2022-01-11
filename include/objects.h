@@ -202,7 +202,11 @@ void vInitSpaceship(image_handle_t spaceship_image);
 
 void vUpdateBulletPosition(void);
 
+void vResetBulletQueue(void);
+
 void vShootBullet(int initial_x, int initial_y, int type);
+
+void vResetColisionQueue(void);
 
 void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer);
 
