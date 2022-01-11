@@ -142,6 +142,30 @@ void vMoveSpaceshipRight(void)
     }
 }
 
+int vSpaceshipBulletActive(char *bullet_state)
+{
+    bullet_t my_bullet[MAX_OBJECTS];
+    int bullet_active = 0, n_bullets, i = 0;
+
+    strcpy(bullet_state, "PASSIVE");
+
+    while(uxQueueMessagesWaiting(BulletQueue)) {
+        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
+        if (my_bullet[i].type == SPACESHIP_BULLET) {
+            bullet_active = 1;
+            strcpy(bullet_state, "ATTACKING");
+        }
+        i++;
+    }
+
+    n_bullets = i;
+    for (i = 0; i < n_bullets; i++) {
+        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
+    }
+
+    return bullet_active;
+}
+
 void vResetSpaceship(void)
 {
     xSemaphoreTake(my_spaceship.lock, portMAX_DELAY);
@@ -170,7 +194,7 @@ void vUpdateBulletPosition(void)
         xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
         if (my_bullet[i].type == SPACESHIP_BULLET)
             my_bullet[i].y = my_bullet[i].y - BULLET_CHANGE;
-        if (my_bullet[i].type == MONSTER_BULLET || my_bullet[i].type == MOTHERGUNSHIP_BULLET)
+        if (my_bullet[i].type == MONSTER_BULLET || my_bullet[i].type == MOTHERSHIP_BULLET)
             my_bullet[i].y = my_bullet[i].y + BULLET_CHANGE;
         i++;
     }
@@ -194,7 +218,7 @@ void vShootBullet(int initial_x, int initial_y, int type)
         my_bullet.colour = Green;
     if (my_bullet.type == MONSTER_BULLET)
         my_bullet.colour = White;
-    if (my_bullet.type == MOTHERGUNSHIP_BULLET)
+    if (my_bullet.type == MOTHERSHIP_BULLET)
         my_bullet.colour = Red;
 
     xQueueSend(BulletQueue, &my_bullet, portMAX_DELAY);
@@ -231,6 +255,82 @@ void vKillMonster(int i, int j)
     xSemaphoreGive(my_monsters.lock);
 }
 
+int vComputeRightmostMonster(int i)
+{
+    int right_index = -1, j;
+
+    for (j = 0; j < N_COLUMNS; j++) {
+        if (my_monsters.monster[i][j].alive)
+            right_index = j;
+    }
+
+    return right_index;
+}
+
+int vComputeLeftmostMonster(int i)
+{
+    int left_index = -1, j;
+
+    for (j = N_COLUMNS - 1; j >= 0; j--) {
+        if (my_monsters.monster[i][j].alive)
+            left_index = j;
+    }
+
+    return left_index;
+}
+
+void vMonsterMoveCloser(void)
+{
+    int i, j;
+
+    if (xSemaphoreTake(my_monsters.lock, 0) == pdTRUE) {
+        for (i = 0; i < N_ROWS; i++) {
+            for (j = 0; j < N_COLUMNS; j++) {
+                if (my_monsters.monster[i][j].alive)
+                    my_monsters.monster[i][j].y = my_monsters.monster[i][j].y + 10;
+            }
+        }
+        xSemaphoreGive(my_monsters.lock);
+    }
+}
+
+void vUpdateMonsterDirection(int *direction)
+{
+    int right_index, left_index, i;
+
+    for (i = 0; i < N_ROWS; i++) {
+        right_index = vComputeRightmostMonster(i);
+        left_index = vComputeLeftmostMonster(i);
+        if (right_index == -1 && left_index == -1)
+            continue;
+        if (my_monsters.monster[i][left_index].x < 10 
+                            || my_monsters.monster[i][right_index].x 
+                            + my_monsters.monster[i][right_index].width > SCREEN_WIDTH - 10) {
+            (*direction) = -1 * (*direction);
+            vMonsterMoveCloser();
+            return;
+        }
+    }
+}
+
+#define MONSTER_CHANGE 5
+
+int vMoveMonster(int i, int j, int direction)
+{
+    if (xSemaphoreTake(my_monsters.lock, 0) == pdTRUE) {
+        if (my_monsters.monster[i][j].alive) {
+            my_monsters.monster[i][j].x = my_monsters.monster[i][j].x + MONSTER_CHANGE * direction;
+            my_monsters.monster[i][j].frametodraw = !my_monsters.monster[i][j].frametodraw;
+            xSemaphoreGive(my_monsters.lock);
+            return 1;
+        } else {
+            xSemaphoreGive(my_monsters.lock);
+            return 0;
+        }
+    }
+    return 0;
+}
+
 void vResetMonsters(void)
 {
     int i, j;
@@ -241,7 +341,7 @@ void vResetMonsters(void)
             my_monsters.monster[i][j].x = 15 + MONSTER_SPACING_H * j;
             my_monsters.monster[i][j].y = SCREEN_HEIGHT / 4 + MONSTER_SPACING_V * i;
             my_monsters.monster[i][j].alive = 1;
-            my_monsters.monster[i][j].todraw = 0;
+            my_monsters.monster[i][j].frametodraw = 0;
         }
     }
     xSemaphoreGive(my_monsters.lock);
@@ -274,7 +374,7 @@ void vInitMonsters(image_handle_t *monster_image, spritesheet_handle_t *monster_
             my_monsters.monster[i][j].x = 15 + MONSTER_SPACING_H * j;
             my_monsters.monster[i][j].y = SCREEN_HEIGHT / 4 + MONSTER_SPACING_V * i;
             my_monsters.monster[i][j].alive = 1;
-            my_monsters.monster[i][j].todraw = 0;
+            my_monsters.monster[i][j].frametodraw = 0;
         }
     }
 
@@ -307,110 +407,110 @@ void vInitMonsterDelay(void)
     xQueueOverwrite(MonsterDelayQueue, &monster_delay);
 }
 
-void vSetUpMothergunshipPVP(void)
+void vSetUpMothershipPVP(void)
 {
-    xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
-    my_mothergunship.x = SCREEN_WIDTH * 2 / 3 - my_mothergunship.width / 2;
-    my_mothergunship.alive = 1;
-    xSemaphoreGive(my_mothergunship.lock);
+    xSemaphoreTake(my_mothership.lock, portMAX_DELAY);
+    my_mothership.x = SCREEN_WIDTH * 2 / 3 - my_mothership.width / 2;
+    my_mothership.alive = 1;
+    xSemaphoreGive(my_mothership.lock);
 }
 
-void vResetMothergunship(void)
+void vResetMothership(void)
 {
     TickType_t timer_starting = xTaskGetTickCount();
 
-    xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
-    my_mothergunship.direction = !my_mothergunship.direction;
-    if (my_mothergunship.direction == LEFT_TO_RIGHT)
-        my_mothergunship.x = -1 * my_mothergunship.width;
-    if (my_mothergunship.direction == RIGHT_TO_LEFT)
-        my_mothergunship.x = SCREEN_WIDTH;
-    if (my_mothergunship.direction == STOP)
-        my_mothergunship.direction = LEFT_TO_RIGHT;
-    my_mothergunship.alive = 1;
-    xSemaphoreGive(my_mothergunship.lock);
-    xTimerChangePeriod(xMothergunshipTimer, ORIGINAL_TIMER, portMAX_DELAY);
+    xSemaphoreTake(my_mothership.lock, portMAX_DELAY);
+    my_mothership.direction = !my_mothership.direction;
+    if (my_mothership.direction == LEFT_TO_RIGHT)
+        my_mothership.x = -1 * my_mothership.width;
+    if (my_mothership.direction == RIGHT_TO_LEFT)
+        my_mothership.x = SCREEN_WIDTH;
+    if (my_mothership.direction == STOP)
+        my_mothership.direction = LEFT_TO_RIGHT;
+    my_mothership.alive = 1;
+    xSemaphoreGive(my_mothership.lock);
+    xTimerChangePeriod(xMothershipTimer, ORIGINAL_TIMER, portMAX_DELAY);
 
     xQueueOverwrite(TimerStartingQueue, &timer_starting);
 }
 
-void vMothergunshipTimerCallback(TimerHandle_t xMothergunshipTimer)
+void vMothershipTimerCallback(TimerHandle_t xMothershipTimer)
 {
-    vResetMothergunship();
+    vResetMothership();
     tumSoundPlayUserSample("ufo_highpitch.wav");
 }
 
-void vKillMothergunship(void)
+void vKillMothership(void)
 {
-    xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
-    my_mothergunship.alive = 0;
-    xSemaphoreGive(my_mothergunship.lock);
+    xSemaphoreTake(my_mothership.lock, portMAX_DELAY);
+    my_mothership.alive = 0;
+    xSemaphoreGive(my_mothership.lock);
 }
 
-int vIsMothergunshipInBoundsLeft(void)
+int vIsMothershipInBoundsLeft(void)
 {
-    if (my_mothergunship.x > 0)
+    if (my_mothership.x > 0)
         return 1;
     
     return 0;
 }
 
-int vIsMothergunshipInBoundsRight(void)
+int vIsMothershipInBoundsRight(void)
 {
-    if (my_mothergunship.x + my_mothergunship.width < SCREEN_WIDTH)
+    if (my_mothership.x + my_mothership.width < SCREEN_WIDTH)
         return 1;
     
     return 0;
 }
 
-void vUpdateMothergunshipPositionPVP(void)
+void vUpdateMothershipPositionPVP(void)
 {
-    if (my_mothergunship.alive) {
-        xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
-        if (my_mothergunship.direction == LEFT_TO_RIGHT && vIsMothergunshipInBoundsRight())
-            my_mothergunship.x = my_mothergunship.x + 1;
+    if (my_mothership.alive) {
+        xSemaphoreTake(my_mothership.lock, portMAX_DELAY);
+        if (my_mothership.direction == LEFT_TO_RIGHT && vIsMothershipInBoundsRight())
+            my_mothership.x = my_mothership.x + 1;
             
-        if (my_mothergunship.direction == RIGHT_TO_LEFT && vIsMothergunshipInBoundsLeft())
-            my_mothergunship.x = my_mothergunship.x - 1;
-        xSemaphoreGive(my_mothergunship.lock);
+        if (my_mothership.direction == RIGHT_TO_LEFT && vIsMothershipInBoundsLeft())
+            my_mothership.x = my_mothership.x - 1;
+        xSemaphoreGive(my_mothership.lock);
     }
 }
 
-void vUpdateMothergunshipPosition(void)
+void vUpdateMothershipPosition(void)
 {
-    if (my_mothergunship.alive) {
-        xSemaphoreTake(my_mothergunship.lock, portMAX_DELAY);
-        if (my_mothergunship.direction == LEFT_TO_RIGHT)
-            my_mothergunship.x = my_mothergunship.x + 1;
-        if (my_mothergunship.direction == RIGHT_TO_LEFT)
-            my_mothergunship.x = my_mothergunship.x - 1;
-        if (my_mothergunship.x > SCREEN_WIDTH) {
-            xSemaphoreGive(my_mothergunship.lock);
-            goto reset_mothergunship;
+    if (my_mothership.alive) {
+        xSemaphoreTake(my_mothership.lock, portMAX_DELAY);
+        if (my_mothership.direction == LEFT_TO_RIGHT)
+            my_mothership.x = my_mothership.x + 1;
+        if (my_mothership.direction == RIGHT_TO_LEFT)
+            my_mothership.x = my_mothership.x - 1;
+        if (my_mothership.x > SCREEN_WIDTH) {
+            xSemaphoreGive(my_mothership.lock);
+            goto reset_mothership;
         }
-        xSemaphoreGive(my_mothergunship.lock);
+        xSemaphoreGive(my_mothership.lock);
     }
 
     return;
 
-reset_mothergunship:
-    vResetMothergunship();
-    vKillMothergunship();
+reset_mothership:
+    vResetMothership();
+    vKillMothership();
     return;
 }
 
-void vInitMothergunship(image_handle_t mothergunship_image)
+void vInitMothership(image_handle_t mothership_image)
 {
     TickType_t timer_starting = xTaskGetTickCount();
 
-    my_mothergunship.image = mothergunship_image;
-    my_mothergunship.x = 0;
-    my_mothergunship.y = MOTHERGUNSHIP_Y;
-    my_mothergunship.width = tumDrawGetLoadedImageWidth(my_mothergunship.image);
-    my_mothergunship.height = tumDrawGetLoadedImageHeight(my_mothergunship.image);
-    my_mothergunship.alive = 0;
-    my_mothergunship.direction = RIGHT_TO_LEFT;
-    my_mothergunship.lock = xSemaphoreCreateMutex();
+    my_mothership.image = mothership_image;
+    my_mothership.x = 0;
+    my_mothership.y = MOTHERSHIP_Y;
+    my_mothership.width = tumDrawGetLoadedImageWidth(my_mothership.image);
+    my_mothership.height = tumDrawGetLoadedImageHeight(my_mothership.image);
+    my_mothership.alive = 0;
+    my_mothership.direction = RIGHT_TO_LEFT;
+    my_mothership.lock = xSemaphoreCreateMutex();
 
     xQueueOverwrite(TimerStartingQueue, &timer_starting);
 }
@@ -480,6 +580,6 @@ void vObjectSemaphoreDelete(void)
     vSemaphoreDelete(saved.lock);
     vSemaphoreDelete(my_spaceship.lock);
     vSemaphoreDelete(my_monsters.lock);
-    vSemaphoreDelete(my_mothergunship.lock);
+    vSemaphoreDelete(my_mothership.lock);
     vSemaphoreDelete(my_bunkers.lock);
 }

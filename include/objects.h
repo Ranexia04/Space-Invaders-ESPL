@@ -14,7 +14,7 @@
 #define BULLET_HEIGHT 8
 #define SPACESHIP_BULLET 0
 #define MONSTER_BULLET 1
-#define MOTHERGUNSHIP_BULLET 2
+#define MOTHERSHIP_BULLET 2
 
 #define N_ROWS 5
 #define N_COLUMNS 11
@@ -28,11 +28,11 @@
 
 #define N_BUNKERS 4
 
-#define MOTHERGUNSHIP_Y 83
+#define MOTHERSHIP_Y 83
 
-#define LEFT_TO_RIGHT 0
-#define RIGHT_TO_LEFT 1
-#define STOP 2
+#define LEFT_TO_RIGHT 1
+#define RIGHT_TO_LEFT -1
+#define STOP 0
 
 typedef struct player {
     int score1;
@@ -99,7 +99,7 @@ typedef struct monster {
     signed short width;
     signed short height;
 
-    int todraw;
+    int frametodraw;
     int type;
     int alive;
 } monster_t;
@@ -113,7 +113,7 @@ typedef struct monster_grid {
     SemaphoreHandle_t lock;
 } monster_grid_t;
 
-typedef struct mothergunship {
+typedef struct mothership {
     image_handle_t image;
 
     int x;
@@ -126,7 +126,7 @@ typedef struct mothergunship {
     int direction;
 
     SemaphoreHandle_t lock;
-} mothergunship_t;
+} mothership_t;
 
 typedef struct bunker_component {
     image_handle_t image;
@@ -149,7 +149,7 @@ typedef struct bunker_grid {
     SemaphoreHandle_t lock;
 } bunker_grid_t;
 
-extern TimerHandle_t xMothergunshipTimer;
+extern TimerHandle_t xMothershipTimer;
 
 extern QueueHandle_t BulletQueue;
 extern QueueHandle_t ColisionQueue;
@@ -164,7 +164,7 @@ extern spaceship_t my_spaceship;
 
 extern monster_grid_t my_monsters;
 
-extern mothergunship_t my_mothergunship;
+extern mothership_t my_mothership;
 
 extern bunker_grid_t my_bunkers;
 
@@ -194,6 +194,8 @@ void vMoveSpaceshipLeft(void);
 
 void vMoveSpaceshipRight(void);
 
+int vSpaceshipBulletActive(char *bullet_state);
+
 void vResetSpaceship(void);
 
 void vInitSpaceship(image_handle_t spaceship_image);
@@ -208,6 +210,16 @@ void vPlayMonsterSound(void *args);
 
 void vKillMonster(int i, int j);
 
+int vComputeRightmostMonster(int i);
+
+int vComputeLeftmostMonster(int i);
+
+void vMonsterMoveCloser(void);
+
+void vUpdateMonsterDirection(int *direction);
+
+int vMoveMonster(int i, int j, int direction);
+
 void vResetMonsters(void);
 
 void vInitMonsters(image_handle_t *monster_image, spritesheet_handle_t *monster_spritesheet);
@@ -218,23 +230,23 @@ void vDecreaseMonsterDelay(void);
 
 void vInitMonsterDelay(void);
 
-void vSetUpMothergunshipPVP(void);
+void vSetUpMothershipPVP(void);
 
-void vResetMothergunship(void);
+void vResetMothership(void);
 
-void vMothergunshipTimerCallback(TimerHandle_t xMothergunshipTimer);
+void vMothershipTimerCallback(TimerHandle_t xMothershipTimer);
 
-void vKillMothergunship(void);
+void vKillMothership(void);
 
-int vIsMothergunshipInBoundsLeft(void);
+int vIsMothershipInBoundsLeft(void);
 
-int vIsMothergunshipInBoundsRight(void);
+int vIsMothershipInBoundsRight(void);
 
-void vUpdateMothergunshipPositionPVP(void);
+void vUpdateMothershipPositionPVP(void);
 
-void vUpdateMothergunshipPosition(void);
+void vUpdateMothershipPosition(void);
 
-void vInitMothergunship(image_handle_t mothergunship_image);
+void vInitMothership(image_handle_t mothership_image);
 
 void vBunkerGetHit(int a, int i, int j);
 
