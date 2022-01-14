@@ -194,36 +194,125 @@ void vMoveSpaceshipLeft(void);
 
 void vMoveSpaceshipRight(void);
 
+/**
+ * @brief Receives all bullets from queue, and checks if any of them
+ * are spaceship type
+ * 
+ * @param bullet_state This string should be "PASSIVE" if no bullet is active
+ * and "ATTACKING" otherwise
+ * @return Returns the same information as the string mentioned above but in integer form.
+ */
 int vSpaceshipBulletActive(char *bullet_state);
 
+/**
+ * @brief Resets position of the spaceship.
+ * 
+ */
 void vResetSpaceship(void);
 
 void vInitSpaceship(image_handle_t spaceship_image);
 
+/**
+ * @brief Receives every bullet in the queue, increments/decrements position 
+ * and gives back to queue.
+ * 
+ */
 void vUpdateBulletPosition(void);
 
+/**
+ * @brief Receives every bullet object in the queue, emptying it.
+ * 
+ */
 void vResetBulletQueue(void);
 
+/**
+ * @brief Creates bullet object and sends it to queue
+ * 
+ * @param initial_x Initial x coordinate of bullet
+ * @param initial_y Initial y coordinate of bullet
+ * @param type Bullets can be shot from spaceship, monsters or mothergunship
+ * Each bullet from each enemy can have different types and we use this to determine
+ * if the bullet moves up or down, for example.
+ */
 void vShootBullet(int initial_x, int initial_y, int type);
 
+/**
+ * @brief Receives every colision object in the queue, emptying it.
+ * 
+ */
 void vResetColisionQueue(void);
 
+/**
+ * @brief Creates a Colision object and sends it to queue by copy
+ * 
+ * @param bullet_x x coordinate of the bullet that created the colision
+ * @param bullet_y y coordinate of the bullet that created the colision
+ * @param image_buffer image to be drawn
+ */
 void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer);
 
+/**
+ * @brief Plays monster moving sound
+ * 
+ * @param args Arguments of callback function.
+ */
 void vPlayMonsterSound(void *args);
 
+void vMonsterCallback(void);
+
+/**
+ * @brief Kills indexed monster
+ * 
+ * @param i row of the monster
+ * @param j column of the monster.
+ */
 void vKillMonster(int i, int j);
 
+/**
+ * @brief For a certain row, computes the leftmost alive monster
+ * 
+ * @param i row to compute left most alive monster
+ * @return Returns the index of the leftmost alive monster, or -1 of all are dead.
+ */
 int vComputeRightmostMonster(int i);
 
+/**
+ * @brief For a certain row, computes the rightmost alive monster
+ * 
+ * @param i row to compute rightmost alive monster
+ * @return Returns the index of the rightmost alive monster, or -1 of all are dead.
+ */
 int vComputeLeftmostMonster(int i);
 
+/**
+ * @brief Moves all the alive monster down a step
+ * 
+ */
 void vMonsterMoveCloser(void);
 
+/**
+ * @brief Checks the direction that the monsters should be updated.
+ * If any monster touches the walls reverts direction
+ * 
+ * 
+ * @param direction Determines if the monster should be moved right or left.
+ */
 void vUpdateMonsterDirection(int *direction);
 
-int vMoveMonster(int i, int j, int direction);
+/**
+ * @brief Moves selected monster left or right if alive
+ * 
+ * @param row row of the monster to move
+ * @param column column of the monster to move
+ * @param direction Determines if the monster should be moved right or left.
+ * @return 1 if the monster was moved successfully and 0 otherwise
+ */
+int vMoveMonster(int row, int column, int direction);
 
+/**
+ * @brief Revives and resets position of all the monsters.
+ * 
+ */
 void vResetMonsters(void);
 
 void vInitMonsters(image_handle_t *monster_image, spritesheet_handle_t *monster_spritesheet);

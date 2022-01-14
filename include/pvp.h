@@ -12,6 +12,8 @@ extern int vCheckCanReceiveData(void);
 
 void vSendBulletState(char *bullet_state_tosend);
 
+void vComputeDiffString(char *tosend);
+
 void vSendSpaceshipMothershipDiff(void);
 
 void vSendDifficultyChange(char *tosend);

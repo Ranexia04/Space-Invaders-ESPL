@@ -234,34 +234,6 @@ static int vCheckStateInput(void)
 	return 0;
 }
 
-#define UPPER_TEXT_YLOCATION 10
-#define LOWER_TEXT_YLOCATION SCREEN_HEIGHT - DEFAULT_FONT_SIZE - 20
-
-void vDrawScores(void)
-{
-    vDrawText("SCORE<1>", 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
-    vDrawNumber(my_player.score1, 45, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
-    vDrawText("HI-SCORE", SCREEN_WIDTH / 3 + 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
-    vDrawNumber(my_player.highscore, SCREEN_WIDTH / 3 + 25, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
-    vDrawText("SCORE<2>", SCREEN_WIDTH * 2 / 3 + 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
-    if (my_player.n_players == 2) {
-        vDrawNumber(my_player.score2, SCREEN_WIDTH * 2 / 3 + 25, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
-    }
-}
-
-void vDrawCredit(void)
-{
-    vDrawText("CREDIT", SCREEN_WIDTH * 2 / 3 - 20, LOWER_TEXT_YLOCATION, NOT_CENTERING);
-    vDrawNumber(my_player.credits, SCREEN_WIDTH - 55, LOWER_TEXT_YLOCATION, 2);
-}
-
-void vDrawGameText(void)
-{
-    vDrawScores();
-    vDrawCredit();
-    vDrawNumber(my_player.n_lives, 20, LOWER_TEXT_YLOCATION, 1);
-}
-
 void vTaskSuspender()
 {
 	if (MenuDrawer) {
@@ -456,6 +428,27 @@ int vCheckButtonInput(int key)
 	return 0;
 }
 
+#define UPPER_TEXT_YLOCATION 10
+#define LOWER_TEXT_YLOCATION SCREEN_HEIGHT - DEFAULT_FONT_SIZE - 20
+
+void vDrawScores(void)
+{
+    vDrawText("SCORE<1>", 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
+    vDrawNumber(my_player.score1, 45, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
+    vDrawText("HI-SCORE", SCREEN_WIDTH / 3 + 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
+    vDrawNumber(my_player.highscore, SCREEN_WIDTH / 3 + 25, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
+    vDrawText("SCORE<2>", SCREEN_WIDTH * 2 / 3 + 10, UPPER_TEXT_YLOCATION, NOT_CENTERING);
+    if (my_player.n_players == 2) {
+        vDrawNumber(my_player.score2, SCREEN_WIDTH * 2 / 3 + 25, UPPER_TEXT_YLOCATION + DEFAULT_FONT_SIZE * 1.3, 4);
+    }
+}
+
+void vDrawCredit(void)
+{
+    vDrawText("CREDIT", SCREEN_WIDTH * 2 / 3 - 20, LOWER_TEXT_YLOCATION, NOT_CENTERING);
+    vDrawNumber(my_player.credits, SCREEN_WIDTH - 55, LOWER_TEXT_YLOCATION, 2);
+}
+
 void vCheckKeyboardInput(void)
 {
 	vCheckStateInput();
@@ -635,7 +628,7 @@ void vMenuDrawer(void *pvParameters)
 		xSemaphoreTake(DrawSignal, portMAX_DELAY);
 		tumEventFetchEvents(FETCH_EVENT_BLOCK |
 					FETCH_EVENT_NO_GL_CHECK);
-		xGetButtonInput(); // Update global input
+		xGetButtonInput();// Update global input
 
 		xSemaphoreTake(ScreenLock, portMAX_DELAY);
 		// Clear screen
@@ -938,49 +931,22 @@ void vGameLogic(void *pvParameters)
         vCheckKeyboardInput();
         vCheckPauseInput();
 
-
-
         vTaskDelay(pdMS_TO_TICKS(8));
 	}
 }
 
-void vDrawBullets(void)
+void vDrawGameText(void)
 {
-    int i = 0, n_bullets;
-    bullet_t my_bullet[MAX_OBJECTS];
-
-    while(uxQueueMessagesWaiting(BulletQueue)) {
-        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
-        checkDraw(tumDrawFilledBox(my_bullet[i].x, my_bullet[i].y, my_bullet[i].width, my_bullet[i].height, my_bullet[i].colour), __FUNCTION__);
-        i++;
-    }
-
-    n_bullets = i;
-    for (i = 0; i < n_bullets; i++) {
-        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
-    }
+    vDrawScores();
+    vDrawCredit();
+    vDrawNumber(my_player.n_lives, 20, LOWER_TEXT_YLOCATION, 1);
 }
 
-void vDrawColisions(void)
+void vDrawSpaceship(void)
 {
-    int i = 0, n_colisions;
-    colision_t my_colision[MAX_OBJECTS];
-
-    while(uxQueueMessagesWaiting(ColisionQueue)) {
-        xQueueReceive(ColisionQueue, &my_colision[i], portMAX_DELAY);
-        if (my_colision[i].image != NULL)
-            checkDraw(tumDrawLoadedImage(my_colision[i].image, my_colision[i].x, my_colision[i].y), __FUNCTION__);
-        my_colision[i].frame_number++;
-        if (my_colision[i].frame_number > 20) {
-            i--;
-        }
-        i++;
-    }
-
-    n_colisions = i;
-    for (i = 0; i < n_colisions; i++) {
-        xQueueSend(ColisionQueue, &my_colision[i], portMAX_DELAY);
-    }
+    checkDraw(tumDrawLoadedImage(my_spaceship.image, my_spaceship.x,
+                                my_spaceship.y),
+                __FUNCTION__);
 }
 
 void vDrawMonsters(void)
@@ -1015,25 +981,83 @@ void vDrawBunkers(void)
     }
 }
 
-void vDrawGameObjects(void)
+void vDrawBullets(void)
 {
-    checkDraw(tumDrawLoadedImage(my_spaceship.image, my_spaceship.x,
-                                my_spaceship.y),
-             __FUNCTION__);
-    checkDraw(tumDrawFilledBox(0, GREEN_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
-    
+    int i = 0, n_bullets;
+    bullet_t my_bullet[MAX_OBJECTS];
+
+    while(uxQueueMessagesWaiting(BulletQueue)) {
+        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
+        checkDraw(tumDrawFilledBox(my_bullet[i].x, my_bullet[i].y, my_bullet[i].width, my_bullet[i].height, my_bullet[i].colour), __FUNCTION__);
+        i++;
+    }
+
+    n_bullets = i;
+    for (i = 0; i < n_bullets; i++) {
+        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
+    }
+}
+
+void vDrawColision(colision_t my_colision)
+{
+    if (my_colision.image != NULL)
+        checkDraw(tumDrawLoadedImage(my_colision.image, my_colision.x, my_colision.y), __FUNCTION__);
+}
+
+#define N_TICKS 20
+
+/**
+ * Receives colision object from queue, draws the image, increments count and returns colision to queue
+ * if the colision has been drawn for more than N_TICKS does not return it to queue, deleting it 
+ */
+void vDrawColisions(void)
+{
+    int i = 0, n_colisions;
+    colision_t my_colision[MAX_OBJECTS];
+
+    while(uxQueueMessagesWaiting(ColisionQueue)) {
+        xQueueReceive(ColisionQueue, &my_colision[i], portMAX_DELAY);
+        vDrawColision(my_colision[i]);
+        my_colision[i].frame_number++;
+        if (my_colision[i].frame_number > N_TICKS) {
+            i--;
+        }
+        i++;
+    }
+
+    n_colisions = i;
+    for (i = 0; i < n_colisions; i++) {
+        xQueueSend(ColisionQueue, &my_colision[i], portMAX_DELAY);
+    }
+}
+
+void vDrawMothership(void)
+{
+    if (my_mothership.alive)
+        checkDraw(tumDrawLoadedImage(my_mothership.image, my_mothership.x, my_mothership.y), __FUNCTION__);
+}
+
+void vDrawLives(void)
+{
     if (my_player.n_lives >= 2)
         checkDraw(tumDrawLoadedImage(my_spaceship.image, 55, LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
     if (my_player.n_lives >= 3)
         checkDraw(tumDrawLoadedImage(my_spaceship.image, 55 + my_spaceship.width * 1.2, LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
-    
+}
+
+void vDrawGameObjects(void)
+{
+    vDrawSpaceship();
     vDrawMonsters();
     vDrawBunkers();
     vDrawBullets();
     vDrawColisions();
+    vDrawMothership();
 
-    if (my_mothership.alive)
-        checkDraw(tumDrawLoadedImage(my_mothership.image, my_mothership.x, my_mothership.y), __FUNCTION__);
+    //draws line separating game and bottom of screen
+    checkDraw(tumDrawFilledBox(0, GREEN_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
+
+    vDrawLives();
 }
 
 void vGameDrawer(void *pvParameters)
@@ -1048,6 +1072,13 @@ void vGameDrawer(void *pvParameters)
         vDrawGameObjects();
 		xSemaphoreGive(ScreenLock);
 	}
+}
+
+void vShootMothershipBullet(void)
+{
+    if (my_player.n_players == 2)
+        vShootBullet(my_mothership.x + my_mothership.width / 2,
+                    my_mothership.y + my_mothership.height, MOTHERSHIP_BULLET);
 }
 
 int vChooseShooterColumn(void)
@@ -1068,6 +1099,13 @@ int vChooseShooterRow(int shooter_column)
     return -1;
 }
 
+/**
+ * Chooses a random column of enemies
+ * Of the choosen column scans through the monster bottom
+ * to top and finds the first monster alive.
+ * If no monster is alive returns repeats the process
+ * until a column with a alive monster is found.
+**/
 void vEnemyBulletShooter(void *pvParameters) {
     int shooter_column, shooter_row;
 
@@ -1083,9 +1121,7 @@ void vEnemyBulletShooter(void *pvParameters) {
                      my_monsters.monster[shooter_row][shooter_column].y 
                      + my_monsters.monster[shooter_row][shooter_column].height, MONSTER_BULLET);
 
-        if (my_player.n_players == 2)
-            vShootBullet(my_mothership.x + my_mothership.width / 2,
-             my_mothership.y + my_mothership.height, MOTHERSHIP_BULLET);
+        vShootMothershipBullet();
 
         vTaskDelay(pdMS_TO_TICKS(2500));
     }
@@ -1106,8 +1142,7 @@ void vMonsterMover(void *pvParameters)
                 xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
                 vTaskDelay(pdMS_TO_TICKS(monster_delay));
             }
-            if (my_monsters.callback)
-                my_monsters.callback(my_monsters.args);
+            vMonsterCallback();//Plays the monsters moving sound
         }
         vUpdateMonsterDirection(&direction);
     }
@@ -1185,6 +1220,10 @@ void vSaveHighScore(void)
     fclose(fp);
 }
 
+/**
+ * Data can still be received even if player selects 1 player mode or is in menu
+ * If thats the case, then doesn't do anything with the received data
+**/
 int vCheckCanReceiveData(void)
 {
     int current_state;
@@ -1212,6 +1251,7 @@ int main(int argc, char *argv[])
 	//  `printf` and `fprintf`. So you can read the documentation on these
 	//  functions to understand the functionality.
 
+    // INITIALIZING EVERYTHING:
 	if (tumDrawInit(bin_folder_path)) {
 		PRINT_ERROR("Failed to intialize drawing");
 		goto err_init_drawing;
@@ -1239,7 +1279,6 @@ int main(int argc, char *argv[])
 	}
 
 	//Semaphores/Mutexes
-
 	buttons.lock = xSemaphoreCreateMutex(); // Locking mechanism
 	if (!buttons.lock) {
 		PRINT_ERROR("Failed to create buttons lock");
@@ -1339,6 +1378,13 @@ int main(int argc, char *argv[])
 		goto err_monster_mover;
 	}
 
+    if (xTaskCreate(vCheckInputSetScore, "CheckInputSetScore", STACK_SIZE,
+			NULL, mainGENERIC_PRIORITY,
+			&CheckInputSetScore) != pdPASS) {
+		PRINT_TASK_ERROR("CheckInputSetScore");
+		goto err_CheckInputSetScore;
+	}
+
 	//State Drawer Tasks
 	if (xTaskCreate(vMenuDrawer, "MenuDrawer", STACK_SIZE,
 			NULL, mainGENERIC_PRIORITY + 1,
@@ -1362,18 +1408,7 @@ int main(int argc, char *argv[])
 		goto err_PauseDrawer;
 	}
 
-    if (xTaskCreate(vCheckInputSetScore, "CheckInputSetScore", STACK_SIZE,
-			NULL, mainGENERIC_PRIORITY,
-			&CheckInputSetScore) != pdPASS) {
-		PRINT_TASK_ERROR("CheckInputSetScore");
-		goto err_CheckInputSetScore;
-	}
-
     srand(time(NULL));
-
-    atexit(vSaveHighScore);
-    atexit(aIODeinit);
-    atexit(vObjectSemaphoreDelete);
 
     vInitImages();
     vInitSpriteSheets();
@@ -1388,6 +1423,10 @@ int main(int argc, char *argv[])
     vInitSavedValues();
     vInitPVP();
 
+    atexit(vSaveHighScore);
+    atexit(aIODeinit);
+    atexit(vObjectSemaphoreDelete);
+
     printf("Welcome to Space Invaders Remastered HD!\n");
 
 	vTaskSuspender();
@@ -1395,14 +1434,14 @@ int main(int argc, char *argv[])
 	vTaskStartScheduler();
 
 	return EXIT_SUCCESS;
-    vTaskDelete(CheckInputSetScore);
-err_CheckInputSetScore:
 	vTaskDelete(PauseDrawer);
 err_PauseDrawer:
 	vTaskDelete(GameDrawer);
 err_GameDrawer:
 	vTaskDelete(MenuDrawer);
 err_MenuDrawer:
+    vTaskDelete(CheckInputSetScore);
+err_CheckInputSetScore:
     vTaskDelete(MonsterMover);
 err_monster_mover:
     vTaskDelete(EnemyBulletShooter);
@@ -1441,7 +1480,6 @@ err_init_audio:
 err_init_events:
 	tumDrawExit();
 err_init_drawing:
-
 	return EXIT_FAILURE;
 }
 

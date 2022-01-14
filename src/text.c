@@ -51,12 +51,12 @@ void vGetNumberString(char *str, int number, int n_digits)
     str[i] = '\0';
     i--;
 
-    while ( index >= 0 ) {
+    while (index >= 0) {
         str[i] = num_str[index];
         index--;
         i--;
     }
-    while ( i >= 0 ) {
+    while (i >= 0) {
         str[i] = '0';
         i--;
     }

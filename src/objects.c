@@ -266,6 +266,12 @@ void vPlayMonsterSound(void *args)
     tumSoundPlayUserSample("fastinvader1.wav");
 }
 
+void vMonsterCallback(void)
+{
+    if (my_monsters.callback)
+        my_monsters.callback(my_monsters.args);
+}
+
 void vKillMonster(int i, int j)
 {
     xSemaphoreTake(my_monsters.lock, portMAX_DELAY);
@@ -322,8 +328,8 @@ void vUpdateMonsterDirection(int *direction)
         if (right_index == -1 && left_index == -1)
             continue;
         if (my_monsters.monster[i][left_index].x < 10 
-                            || my_monsters.monster[i][right_index].x 
-                            + my_monsters.monster[i][right_index].width > SCREEN_WIDTH - 10) {
+                    || my_monsters.monster[i][right_index].x 
+                    + my_monsters.monster[i][right_index].width > SCREEN_WIDTH - 10) {
             (*direction) = -1 * (*direction);
             vMonsterMoveCloser();
             return;
@@ -333,12 +339,12 @@ void vUpdateMonsterDirection(int *direction)
 
 #define MONSTER_CHANGE 5
 
-int vMoveMonster(int i, int j, int direction)
+int vMoveMonster(int row, int column, int direction)
 {
     if (xSemaphoreTake(my_monsters.lock, 0) == pdTRUE) {
-        if (my_monsters.monster[i][j].alive) {
-            my_monsters.monster[i][j].x = my_monsters.monster[i][j].x + MONSTER_CHANGE * direction;
-            my_monsters.monster[i][j].frametodraw = !my_monsters.monster[i][j].frametodraw;
+        if (my_monsters.monster[row][column].alive) {
+            my_monsters.monster[row][column].x = my_monsters.monster[row][column].x + MONSTER_CHANGE * direction;
+            my_monsters.monster[row][column].frametodraw = !my_monsters.monster[row][column].frametodraw;
             xSemaphoreGive(my_monsters.lock);
             return 1;
         } else {

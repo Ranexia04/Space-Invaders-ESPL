@@ -20,6 +20,7 @@
 
 #include "AsyncIO.h"
 
+#include "text.h"
 #include "objects.h"
 #include "pvp.h"
 
@@ -32,14 +33,32 @@ void vSendBulletState(char *bullet_state_tosend)
     }
 }
 
-void vSendSpaceshipMothershipDiff(void)
+void vComputeDiffString(char *tosend)
 {
     int diff = my_spaceship.x - my_mothership.x;
+    char number_str[4];
 
-    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)&diff, sizeof(diff))) {
-        PRINT_ERROR("Failed to send position to opponent");
+    if (diff < 0) {
+        strcat(tosend, "-");
+        diff = -1 * diff;
     } else {
-        prints("Sent position to opponent\n");
+        strcat(tosend, "+");
+    }
+
+    vGetNumberString(number_str, diff, 4);
+    strcat(tosend, number_str);
+}
+
+void vSendSpaceshipMothershipDiff(void)
+{
+    char tosend[5] = {'\0'};
+
+    vComputeDiffString(tosend);
+
+    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, tosend, strlen(tosend))) {
+        PRINT_ERROR("Failed to position diference to opponent");
+    } else {
+        prints("Sent position diference (%s) to opponent\n", tosend);
     }
 }
 
