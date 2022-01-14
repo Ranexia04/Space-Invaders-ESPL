@@ -12,7 +12,7 @@ extern int vCheckCanReceiveData(void);
 
 void vSendBulletState(char *bullet_state_tosend);
 
-void vSendSpaceshipLocation(void);
+void vSendSpaceshipMothershipDiff(void);
 
 void vSendDifficultyChange(char *tosend);
 

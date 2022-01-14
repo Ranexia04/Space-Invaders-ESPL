@@ -32,9 +32,11 @@ void vSendBulletState(char *bullet_state_tosend)
     }
 }
 
-void vSendSpaceshipLocation(void)
+void vSendSpaceshipMothershipDiff(void)
 {
-    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)&my_spaceship.x, sizeof(my_spaceship.x))) {
+    int diff = my_spaceship.x - my_mothership.x;
+
+    if(aIOSocketPut(UDP, IPv4_addr, UDP_TRANSMIT_PORT, (char *)&diff, sizeof(diff))) {
         PRINT_ERROR("Failed to send position to opponent");
     } else {
         prints("Sent position to opponent\n");
@@ -71,8 +73,8 @@ void vReceiveCallback(size_t receive_size, char *buffer, void *args)
 
 void vInitPVP(void)
 {
-    UDP_receive_handle = aIOOpenUDPSocket(IPv4_addr, UDP_RECEIVE_PORT, sizeof("HALT"), 
+    UDP_receive_handle = aIOOpenUDPSocket(IPv4_addr, UDP_RECEIVE_PORT, 2000, 
             vReceiveCallback, NULL);
-    UDP_transmit_handle = aIOOpenUDPSocket(IPv4_addr, UDP_TRANSMIT_PORT, sizeof("ATTACKING"), 
-            NULL, NULL);
+    //UDP_transmit_handle = aIOOpenUDPSocket(IPv4_addr, UDP_TRANSMIT_PORT, 2000, 
+            //NULL, NULL);
 }

@@ -876,13 +876,13 @@ void vCheckMothershipDifficultyChange(void)
 	}
 }
 
-void vCheckSendSpaceshipLocation(void)
+void vCheckSendSpaceshipMothershipDiff(void)
 {
     static int prev_spaceship_location = 0;
     static TickType_t lastTimeSend = 0;
 
     if (my_spaceship.x != prev_spaceship_location && xTaskGetTickCount() - lastTimeSend > pdMS_TO_TICKS(500)) {
-        vSendSpaceshipLocation();
+        vSendSpaceshipMothershipDiff();
         prev_spaceship_location = my_spaceship.x;
         lastTimeSend = xTaskGetTickCount();
     }
@@ -928,7 +928,7 @@ void vGameLogic(void *pvParameters)
         vCheckBulletShoot(bullet_state);
 
         if (my_player.n_players == 2) {
-            vCheckSendSpaceshipLocation();
+            vCheckSendSpaceshipMothershipDiff();
             vCheckSendBulletState(bullet_state);
             vCheckMothershipDifficultyChange();
         }
@@ -937,6 +937,8 @@ void vGameLogic(void *pvParameters)
         vCheckPlayerDead();
         vCheckKeyboardInput();
         vCheckPauseInput();
+
+
 
         vTaskDelay(pdMS_TO_TICKS(8));
 	}
