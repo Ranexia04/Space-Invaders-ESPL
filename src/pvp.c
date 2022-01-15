@@ -38,6 +38,8 @@ void vComputeDiffString(char *tosend)
     int diff = my_spaceship.x - my_mothership.x;
     char number_str[4];
 
+    //inserts - or + in the string depending on if
+    // the difference in position is positive or negative
     if (diff < 0) {
         strcat(tosend, "-");
         diff = -1 * diff;
@@ -45,6 +47,7 @@ void vComputeDiffString(char *tosend)
         strcat(tosend, "+");
     }
 
+    //inserts the absolute value in the string
     vGetNumberString(number_str, diff, 4);
     strcat(tosend, number_str);
 }

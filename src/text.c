@@ -22,18 +22,19 @@
 
 void vAddSpaces(char *str)
 {
-    int index = 0;
+    int i = 0;
     char buffer[30], buffer2[30];
 
+    //puts string in buffer and resets string
     strcpy(buffer, str);
     strcpy(str, "");
 
-    while ( buffer[index] != '\0') {
-        sprintf(buffer2, "%c ", buffer[index]);
+    //adds each letter followed by a space to str
+    while (buffer[i] != '\0') {
+        sprintf(buffer2, "%c ", buffer[i]);
         strcat(str, buffer2);
-        index++;
+        i++;
     }
-        
 }
 
 void vGetNumberString(char *str, int number, int n_digits)
@@ -49,13 +50,14 @@ void vGetNumberString(char *str, int number, int n_digits)
     
     i = n_digits;
     str[i] = '\0';
-    i--;
+    i--;//i is now at the place where we put last digit
 
+    //puts each number in the final string
     while (index >= 0) {
         str[i] = num_str[index];
         index--;
         i--;
-    }
+    }//completes the left part of the string with zeros
     while (i >= 0) {
         str[i] = '0';
         i--;
@@ -70,7 +72,7 @@ void vDrawText(char *buffer, int x, int y, int centering)
     strcpy(str, buffer);
     vAddSpaces(str);
 	tumGetTextSize(str, &text_width, NULL);
-    if ( centering == CENTERING ) {
+    if (centering == CENTERING) {
         x = x - text_width / 2;
         y = y - DEFAULT_FONT_SIZE / 2;
     }
@@ -79,6 +81,7 @@ void vDrawText(char *buffer, int x, int y, int centering)
 
 void vGetMaxNumber(int *max_number, int n_digits)
 {
+    //adds 9, 90, 900 etc depending on the number of digits
     for ( int i = 0; i < n_digits; i++) {
         (*max_number) = (*max_number) + 9 * pow(10, i);
     }

@@ -107,6 +107,7 @@ void vUpdateSavedValues(void)
     saved.score = my_player.score1;
     xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
     saved.offset = monster_delay - ORIGINAL_MONSTER_DELAY;
+    //the - 1 is there so that when we return to menu the credit is correct
     saved.credits = my_player.credits - 1;
     xSemaphoreGive(saved.lock);
 }
@@ -118,6 +119,13 @@ void vInitSavedValues(void)
     saved.offset = 0;
     saved.credits = 0;
     saved.lock = xSemaphoreCreateMutex();
+}
+
+void vDrawSpaceship(void)
+{
+    checkDraw(tumDrawLoadedImage(my_spaceship.image, my_spaceship.x,
+                                my_spaceship.y),
+                __FUNCTION__);
 }
 
 void vFixSpaceshipOutofBounds(void)
@@ -180,6 +188,23 @@ void vInitSpaceship(image_handle_t spaceship_image)
     my_spaceship.lock = xSemaphoreCreateMutex();
 }
 
+void vDrawBullets(void)
+{
+    int i = 0, n_bullets;
+    bullet_t my_bullet[MAX_OBJECTS];
+
+    while(uxQueueMessagesWaiting(BulletQueue)) {
+        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
+        checkDraw(tumDrawFilledBox(my_bullet[i].x, my_bullet[i].y, my_bullet[i].width, my_bullet[i].height, my_bullet[i].colour), __FUNCTION__);
+        i++;
+    }
+
+    n_bullets = i;
+    for (i = 0; i < n_bullets; i++) {
+        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
+    }
+}
+
 #define BULLET_CHANGE 3
 
 void vUpdateBulletPosition(void)
@@ -189,6 +214,7 @@ void vUpdateBulletPosition(void)
 
     while (uxQueueMessagesWaiting(BulletQueue)) {
         xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
+        //spaceship bullets go up and other bullets go down
         if (my_bullet[i].type == SPACESHIP_BULLET)
             my_bullet[i].y = my_bullet[i].y - BULLET_CHANGE;
         if (my_bullet[i].type == MONSTER_BULLET || my_bullet[i].type == MOTHERSHIP_BULLET)
@@ -230,6 +256,35 @@ void vShootBullet(int initial_x, int initial_y, int type)
     xQueueSend(BulletQueue, &my_bullet, portMAX_DELAY);
 }
 
+void vDrawColision(colision_t my_colision)
+{
+    if (my_colision.image != NULL)
+        checkDraw(tumDrawLoadedImage(my_colision.image, my_colision.x, my_colision.y), __FUNCTION__);
+}
+
+#define N_TICKS 20
+
+void vDrawColisions(void)
+{
+    int i = 0, n_colisions;
+    colision_t my_colision[MAX_OBJECTS];
+
+    while(uxQueueMessagesWaiting(ColisionQueue)) {
+        xQueueReceive(ColisionQueue, &my_colision[i], portMAX_DELAY);
+        vDrawColision(my_colision[i]);
+        my_colision[i].frame_number++;
+        if (my_colision[i].frame_number > N_TICKS) {
+            i--;
+        }
+        i++;
+    }
+
+    n_colisions = i;
+    for (i = 0; i < n_colisions; i++) {
+        xQueueSend(ColisionQueue, &my_colision[i], portMAX_DELAY);
+    }
+}
+
 void vResetColisionQueue(void)
 {
     colision_t colision;
@@ -244,6 +299,8 @@ void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer)
     colision_t my_colision;
 
     my_colision.image = image_buffer;
+    //if we dont want a bullet colision to spawn an image
+    // we can not give colision an image
     if (my_colision.image != NULL) {
         my_colision.width = tumDrawGetLoadedImageWidth(my_colision.image);
         my_colision.height = tumDrawGetLoadedImageHeight(my_colision.image);
@@ -256,6 +313,22 @@ void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer)
     my_colision.frame_number = 0;
 
     xQueueSend(ColisionQueue, &my_colision, portMAX_DELAY);
+}
+
+void vDrawMonsters(void)
+{
+    int i, j;
+
+    for (i = 0; i < N_ROWS; i++) {
+        for (j = 0; j < N_COLUMNS; j++) {
+            if (my_monsters.monster[i][j].alive)
+                checkDraw(tumDrawSprite(my_monsters.monster[i][j].spritesheet,
+                 my_monsters.monster[i][j].frametodraw, 0,
+                 my_monsters.monster[i][j].x, my_monsters.monster[i][j].y),
+                                         __FUNCTION__);
+            
+        }
+    }
 }
 
 void vPlayMonsterSound(void *args)
@@ -322,8 +395,9 @@ void vUpdateMonsterDirection(int *direction)
     for (i = 0; i < N_ROWS; i++) {
         right_index = vComputeRightmostMonster(i);
         left_index = vComputeLeftmostMonster(i);
-        if (right_index == -1 && left_index == -1)
+        if (right_index == -1 && left_index == -1)//when no monsters are alive
             continue;
+        //if hit wall
         if (my_monsters.monster[i][left_index].x < 10 
                     || my_monsters.monster[i][right_index].x 
                     + my_monsters.monster[i][right_index].width > SCREEN_WIDTH - 10) {
@@ -336,12 +410,14 @@ void vUpdateMonsterDirection(int *direction)
 
 #define MONSTER_CHANGE 5
 
-int vMoveMonster(int row, int column, int direction)
+int vMoveMonster(int i, int j, int direction)
 {
     if (xSemaphoreTake(my_monsters.lock, 0) == pdTRUE) {
-        if (my_monsters.monster[row][column].alive) {
-            my_monsters.monster[row][column].x = my_monsters.monster[row][column].x + MONSTER_CHANGE * direction;
-            my_monsters.monster[row][column].frametodraw = !my_monsters.monster[row][column].frametodraw;
+        if (my_monsters.monster[i][j].alive) {
+            my_monsters.monster[i][j].x = my_monsters.monster[i][j].x
+                                             + MONSTER_CHANGE * direction;
+            my_monsters.monster[i][j].frametodraw 
+                    = !my_monsters.monster[i][j].frametodraw;
             xSemaphoreGive(my_monsters.lock);
             return 1;
         } else {
@@ -426,6 +502,13 @@ void vInitMonsterDelay(void)
     TickType_t monster_delay = ORIGINAL_MONSTER_DELAY;
 
     xQueueOverwrite(MonsterDelayQueue, &monster_delay);
+}
+
+void vDrawMothership(void)
+{
+    if (my_mothership.alive)
+        checkDraw(tumDrawLoadedImage(my_mothership.image,
+             my_mothership.x, my_mothership.y), __FUNCTION__);
 }
 
 void vSetUpMothershipPVP(void)
@@ -540,6 +623,24 @@ void vInitMothership(image_handle_t mothership_image)
     my_mothership.lock = xSemaphoreCreateMutex();
 
     xQueueOverwrite(TimerStartingQueue, &timer_starting);
+}
+
+void vDrawBunkers(void)
+{
+    int k, i, j;
+
+    for (k = 0; k < N_BUNKERS; k++) {
+        for (i = 0; i < 2; i++) {
+            for (j = 0; j < 3; j++) {
+                if (my_bunkers.bunker[k].component[i][j].damage < 3) {
+                    checkDraw(tumDrawLoadedImage(my_bunkers.bunker[k].component[i][j].image,
+                                    my_bunkers.bunker[k].component[i][j].x,
+                                    my_bunkers.bunker[k].component[i][j].y)
+                                    , __FUNCTION__);
+                }
+            }
+        }
+    }
 }
 
 void vBunkerGetHit(int a, int i, int j)

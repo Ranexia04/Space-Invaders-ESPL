@@ -238,7 +238,9 @@ static int vCheckStateInput(void)
 	return 0;
 }
 
-void vTaskSuspender()
+//suspends all tasks except 
+//screendrawer task and state machine tast
+void vSuspendAllTasks()
 {
 	if (MenuDrawer) {
 		vTaskSuspend(MenuDrawer);
@@ -288,9 +290,77 @@ void changeState(volatile unsigned char *state, unsigned char forwards)
 	}
 }
 
+void vSwitchToMenu(unsigned char prev_state)
+{
+    if (prev_state == GAME) {
+        vResetGameBoard();
+        vResetPlayer();
+        if (my_player.n_players == 1)
+            xTimerStop(xMothershipTimer, portMAX_DELAY);
+            prints("Match exited.\n");
+    }
+	if (MenuDrawer) {
+		vTaskResume(MenuDrawer);
+	}
+}
+
+void vResumeGameTasks(void)
+{
+    if (GameDrawer) {
+		vTaskResume(GameDrawer);
+	}
+	if (GameLogic) {
+		vTaskResume(GameLogic);
+    }
+    if (EnemyBulletShooter) {
+		vTaskResume(EnemyBulletShooter);
+    }
+    if (MonsterMover) {
+		vTaskResume(MonsterMover);
+    }
+}
+
+void vSwitchToGame(unsigned char prev_state,
+         unsigned char current_state, TickType_t timer_elapsed)
+{
+    if (prev_state == MENU || prev_state == current_state) {
+        if (my_player.n_players == 1) {
+            vKillMothership();
+            xTimerReset(xMothershipTimer, portMAX_DELAY);
+        }
+        if (my_player.n_players == 2) {
+            vSetUpMothershipPVP();
+            prints("2 Players selected.\n");
+        }
+        prints("Match started! Good luck and Have fun!\n");
+    }
+    if (prev_state == PAUSE) {
+        if (my_player.n_players == 1)
+            xTimerChangePeriod(xMothershipTimer, ORIGINAL_TIMER - timer_elapsed, portMAX_DELAY);
+            prints("Game unpaused.\n");
+    }
+    vResumeGameTasks();
+}
+
+void vSwitchToPause(unsigned char prev_state,
+             TickType_t *timer_starting, TickType_t *timer_elapsed)
+{
+    if (prev_state == GAME) {
+        if (my_player.n_players == 1) {
+            xTimerStop(xMothershipTimer, portMAX_DELAY);
+            *timer_starting = xQueuePeek(TimerStartingQueue, timer_starting, portMAX_DELAY);
+            *timer_elapsed = xTaskGetTickCount() - *timer_starting;
+        }
+        prints("Game paused.\n");
+    }
+    if (PauseDrawer) {
+		vTaskResume(PauseDrawer);
+    }
+}
+
 void basicSequentialStateMachine(void *pvParameters)
 {
-	unsigned char current_state = STARTING_STATE; // Default state
+	unsigned char current_state = STARTING_STATE;//Default state
     unsigned char prev_state = STARTING_STATE;
 	unsigned char state_changed =
 		1; // Only re-evaluate state if it has changed
@@ -327,62 +397,16 @@ void basicSequentialStateMachine(void *pvParameters)
 	initial_state:
 		// Handle current state
 		if (state_changed) {
-			vTaskSuspender();
+			vSuspendAllTasks();
 			switch (current_state) {
 			case MENU:
-                if (prev_state == GAME) {
-                    vResetGameBoard();
-                    vResetPlayer();
-                    if (my_player.n_players == 1)
-                        xTimerStop(xMothershipTimer, portMAX_DELAY);
-                    prints("Match exited.\n");
-                }
-				if (MenuDrawer) {
-					vTaskResume(MenuDrawer);
-				}
+                vSwitchToMenu(prev_state);
 				break;
 			case GAME:
-                if (prev_state == MENU || prev_state == current_state) {
-                    if (my_player.n_players == 1) {
-                        vKillMothership();
-                        xTimerReset(xMothershipTimer, portMAX_DELAY);
-                    }
-                    prints("Match started! Good luck and Have fun!\n");
-                    if (my_player.n_players == 2) {
-                        vSetUpMothershipPVP();
-                        prints("2 Players selected.\n");
-                    }
-                }
-                if (prev_state == PAUSE) {
-                    if (my_player.n_players == 1)
-                        xTimerChangePeriod(xMothershipTimer, ORIGINAL_TIMER - timer_elapsed, portMAX_DELAY);
-                    prints("Game unpaused.\n");
-                }
-				if (GameDrawer) {
-					vTaskResume(GameDrawer);
-				}
-				if (GameLogic) {
-					vTaskResume(GameLogic);
-                }
-                if (EnemyBulletShooter) {
-					vTaskResume(EnemyBulletShooter);
-                }
-                if (MonsterMover) {
-					vTaskResume(MonsterMover);
-                }
+                vSwitchToGame(prev_state, current_state, timer_elapsed);
 				break;
             case PAUSE:
-                if (prev_state == GAME) {
-                    if (my_player.n_players == 1) {
-                        xTimerStop(xMothershipTimer, portMAX_DELAY);
-                        timer_starting = xQueuePeek(TimerStartingQueue, &timer_starting, portMAX_DELAY);
-                        timer_elapsed = xTaskGetTickCount() - timer_starting;
-                    }
-                    prints("Game paused.\n");
-                }
-                if (PauseDrawer) {
-					vTaskResume(PauseDrawer);
-                }
+                vSwitchToPause(prev_state, &timer_starting, &timer_elapsed);
                 break;
 			default:
 				break;
@@ -453,43 +477,54 @@ void vDrawCredit(void)
     vDrawNumber(my_player.credits, SCREEN_WIDTH - 55, LOWER_TEXT_YLOCATION, 2);
 }
 
-void vCheckKeyboardInput(void)
+void vCheckGameInput(void)
 {
 	vCheckStateInput();
 	vCheckButtonInput(KEYCODE(A));
 	vCheckButtonInput(KEYCODE(D));
+    vCheckPauseInput();
+}
+
+void vDrawFirstScreen(void)
+{
+    vDrawText("INSERT  [C]OIN", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, CENTERING);
+    vDrawText("<[1] OR [2] PLAYERS>", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
+    if (my_player.n_players == 1) {
+        vDrawText("1 PLAYER", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3, CENTERING);
+    }
+    if (my_player.n_players == 2) {
+        vDrawText("2 PLAYERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3, CENTERING);
+    }
+}
+
+void vDrawSecondScreen(void)
+{
+    vDrawText("SPACE INVADERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 - 30, CENTERING);
+    vDrawText("[M]: PLAY/QUIT", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4  + DEFAULT_FONT_SIZE * 1.5 - 30, CENTERING);
+    vDrawText("[P]: PAUSE/UNPAUSE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 + DEFAULT_FONT_SIZE * 3 - 30, CENTERING);
+
+    vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 1.5 + 10, CENTERING);
+    checkDraw(tumDrawLoadedImage(mothership_image, SCREEN_WIDTH / 5 - 5, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 3 + 10), __FUNCTION__);
+    vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 3 + 10, CENTERING);
+    checkDraw(tumDrawSprite(monster_spritesheet[0], 0, 0, SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 4.5 + 10), __FUNCTION__);
+    vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 4.5 + 10, CENTERING);
+    checkDraw(tumDrawSprite(monster_spritesheet[1], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 6 + 10), __FUNCTION__);
+    vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 6 + 10, CENTERING);
+    checkDraw(tumDrawSprite(monster_spritesheet[2], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 7.5 + 10), __FUNCTION__);
+    vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 7.5 + 10, CENTERING);
+
+    vDrawText("[I]NFINITE LIVES", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4, CENTERING);
+    vDrawText("STARTING [S]CORE", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
+    vDrawText("STARTING [L]EVEL", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4 + DEFAULT_FONT_SIZE * 3, CENTERING);
 }
 
 void vDrawMenuText(void)
 {
     vDrawScores();
     if (my_player.credits && my_player.n_players) {
-        vDrawText("SPACE INVADERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 - 30, CENTERING);
-        vDrawText("[M]: PLAY/QUIT", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4  + DEFAULT_FONT_SIZE * 1.5 - 30, CENTERING);
-        vDrawText("[P]: PAUSE/UNPAUSE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4 + DEFAULT_FONT_SIZE * 3 - 30, CENTERING);
-
-        vDrawText("SCORE ADVANCE TABLE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 1.5 + 10, CENTERING);
-        checkDraw(tumDrawLoadedImage(mothership_image, SCREEN_WIDTH / 5 - 5, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 3 + 10), __FUNCTION__);
-        vDrawText("=? MYSTERY", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 3 + 10, CENTERING);
-        checkDraw(tumDrawSprite(monster_spritesheet[0], 0, 0, SCREEN_WIDTH / 4 + 3, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 4.5 + 10), __FUNCTION__);
-        vDrawText("=30 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 4.5 + 10, CENTERING);
-        checkDraw(tumDrawSprite(monster_spritesheet[1], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 6 + 10), __FUNCTION__);
-        vDrawText("=20 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 6 + 10, CENTERING);
-        checkDraw(tumDrawSprite(monster_spritesheet[2], 0, 0, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 7.5 + 10), __FUNCTION__);
-        vDrawText("=10 POINTS", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3 + DEFAULT_FONT_SIZE * 7.5 + 10, CENTERING);
-
-        vDrawText("[I]NFINITE LIVES", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4, CENTERING);
-        vDrawText("STARTING [S]CORE", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4 + DEFAULT_FONT_SIZE * 1.5, CENTERING);
-        vDrawText("STARTING [L]EVEL", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 3 / 4 + DEFAULT_FONT_SIZE * 3, CENTERING);
+        vDrawSecondScreen();
     } else {
-        vDrawText("INSERT  [C]OIN", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, CENTERING);
-        vDrawText("<[1] OR [2] PLAYERS>", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, CENTERING);
-        if (my_player.n_players == 1) {
-            vDrawText("1 PLAYER", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3, CENTERING);
-        }
-        if (my_player.n_players == 2) {
-            vDrawText("2 PLAYERS", SCREEN_WIDTH / 2, SCREEN_HEIGHT * 2 / 3, CENTERING);
-        }
+        vDrawFirstScreen();
     }
     vDrawCredit();
 }
@@ -525,21 +560,21 @@ void vCheckInputSetScore(void *pvParameters)
 					FETCH_EVENT_NO_GL_CHECK);
         xGetButtonInput();
         if (xSemaphoreTake(buttons.lock, 0) == pdTRUE) {
-            for (i = 30; i < 40; i++) {
+            for (i = 30; i < 40; i++) {//scans scancodes 0 to 9
                 if (buttons.buttons[i]) {
                     buttons.buttons[i] = 0;
-                    digit = i - 29;
-                    //the scancode for button 0 after the number 9 so we have to decrement 10
-                    if (digit == 10)
-                        digit = 0;
-                    printf("%d\n", digit);
-                    digit_in_text = digit + '0';
-                    //strcat(text, digit_in_text);
-                    sprintf(text, "%s%c", text, digit_in_text);
+                    digit = i - 29;//scancode 30 is equal to number 1 so we remove 29
+                    if (digit == 10)//the scancode for button 0 after
+                        digit = 0;//the number 9 so we have to decrement 10
+                    prints("%d\n", digit);
+                    digit_in_text = digit + '0';//converts int to char
+                    sprintf(text, "%s%c", text, digit_in_text);//concatenates the pressed number
                 }
             }
             if (buttons.buttons[SDL_SCANCODE_RETURN]) {
+                xSemaphoreTake(my_player.lock, portMAX_DELAY);
                 my_player.score1 = atoi(text);
+                xSemaphoreGive(my_player.lock);
                 xSemaphoreGive(buttons.lock);
                 vTaskResume(MenuDrawer);
                 vTaskSuspend(CheckInputSetScore);
@@ -552,12 +587,10 @@ void vCheckInputSetScore(void *pvParameters)
 
 void vSetCheat2(void)
 {
-    xSemaphoreTake(my_player.lock, portMAX_DELAY);
     prints("Input the starting score with keyboard and press enter.\n");
     vTaskResume(CheckInputSetScore);
     vTaskSuspend(MenuDrawer);
     prints("Starting score set\n");
-    xSemaphoreGive(my_player.lock);
 }
 
 void vSetCheat3(void)
@@ -566,6 +599,8 @@ void vSetCheat3(void)
 
     xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
     monster_delay = monster_delay + 5;
+    //delay cannot be decreased too much or it would
+    // become negative by the end of each game
     if (monster_delay > ORIGINAL_MONSTER_DELAY + 20) {
         monster_delay = ORIGINAL_MONSTER_DELAY;
         prints("Monster speed reseted.\n");
@@ -626,6 +661,14 @@ void vCheckPlayerSet(void)
 	}
 }
 
+void vCheckMenuInput(void)
+{
+    vCheckStateInput();
+    vCheckCheatInput();
+    vCheckCoinInput();
+    vCheckPlayerSet();
+}
+
 void vMenuDrawer(void *pvParameters)
 {
 	while (1) {
@@ -641,17 +684,15 @@ void vMenuDrawer(void *pvParameters)
 		vDrawMenuText();
 		xSemaphoreGive(ScreenLock);
 
-		vCheckKeyboardInput();
-        vCheckCheatInput();
-        vCheckCoinInput();
-        vCheckPlayerSet();
+        vCheckMenuInput();
         vUpdateSavedValues();
 	}
 }
 
 int vCheckBulletHitCeiling(bullet_t my_bullet)
 {
-    if (my_bullet.y <= TOP_LINE_Y && my_bullet.type == SPACESHIP_BULLET)//bullet exceeded top limit
+    //bullet exceeded top limit
+    if (my_bullet.y <= TOP_LINE_Y && my_bullet.type == SPACESHIP_BULLET)
         return 1;
 
     return 0;
@@ -660,13 +701,15 @@ int vCheckBulletHitCeiling(bullet_t my_bullet)
 int vCheckBulletHitMonster(bullet_t my_bullet, int i, int j)
 {
     if (my_bullet.y - BULLET_HEIGHT >= my_monsters.monster[i][j].y
-                && my_bullet.y <= my_monsters.monster[i][j].y + my_monsters.monster[i][j].height
+                && my_bullet.y <= my_monsters.monster[i][j].y
+                                 + my_monsters.monster[i][j].height
                 && my_bullet.x >= my_monsters.monster[i][j].x
-                && my_bullet.x <= my_monsters.monster[i][j].x + my_monsters.monster[i][j].width
-                && my_monsters.monster[i][j].alive && my_bullet.type == SPACESHIP_BULLET) {
+                && my_bullet.x <= my_monsters.monster[i][j].x
+                                 + my_monsters.monster[i][j].width
+                && my_monsters.monster[i][j].alive
+                && my_bullet.type == SPACESHIP_BULLET) {
         return 1;
     }
-
     return 0;
 }
 
@@ -677,7 +720,6 @@ int vCheckBulletHitFloor(bullet_t my_bullet)
                         || my_bullet.type == MOTHERSHIP_BULLET)) {
         return 1;
     }
-
     return 0;
 }
 
@@ -691,7 +733,6 @@ int vCheckBulletHitSpaceship(bullet_t my_bullet)
                             || my_bullet.type == MOTHERSHIP_BULLET)) {
         return 1;
     }
-
     return 0;
 }
 
@@ -705,7 +746,6 @@ int vCheckBulletHitMothership(bullet_t my_bullet)
                             && my_bullet.type == SPACESHIP_BULLET) {
             return 1;
     }
-
     return 0;
 }
 
@@ -720,7 +760,6 @@ int vCheckBulletHitBunker(bullet_t my_bullet, int a, int i, int j)
                     + my_bunkers.bunker[a].component[i][j].width) {
         return 1;
     }
-
     return 0;
 }
 
@@ -741,8 +780,11 @@ void vCheckBulletColision(void)
             for (j = 0; j < N_COLUMNS; j++) {
                 if (vCheckBulletHitMonster(my_bullet[k], i, j)) {
                     vUpdatePlayerScore(i, j);
-                    createColision(my_monsters.monster[i][j].x + my_monsters.monster[i][j].width / 2, 
-                                            my_monsters.monster[i][j].y + my_monsters.monster[i][j].height / 2, colision_image[1]);
+                    createColision(my_monsters.monster[i][j].x 
+                                     + my_monsters.monster[i][j].width / 2, 
+                                    my_monsters.monster[i][j].y
+                                     + my_monsters.monster[i][j].height / 2,
+                                                     colision_image[1]);
                     vKillMonster(i, j);
                     tumSoundPlayUserSample("invaderkilled.wav");
                     vDecreaseMonsterDelay();
@@ -844,7 +886,6 @@ int vCheckMonstersInvaded(void)
               }
         }
     }
-
     return 0;
 }
 
@@ -894,14 +935,15 @@ void vCheckSendBulletState(char *bullet_state)
     if (strcmp(bullet_state, prev_bullet_state) != 0) {
         vSendBulletState(bullet_state_tosend[i]);
         strcpy(prev_bullet_state, bullet_state);
-        i = !i;
+        i = !i;//swiches between both attacking and passive strings
     }
 }
 
 void vCheckBulletShoot(char *bullet_state)
 {
     if (tumEventGetMouseLeft() && strcmp(bullet_state, "PASSIVE") == 0) {
-        vShootBullet(my_spaceship.x + my_spaceship.width / 2, my_spaceship.y, SPACESHIP_BULLET);
+        vShootBullet(my_spaceship.x + my_spaceship.width / 2,
+                     my_spaceship.y, SPACESHIP_BULLET);
         tumSoundPlayUserSample("shoot.wav");
     }
 }
@@ -932,8 +974,7 @@ void vGameLogic(void *pvParameters)
 
         vCheckMonstersDead();
         vCheckPlayerDead();
-        vCheckKeyboardInput();
-        vCheckPauseInput();
+        vCheckGameInput();
 
         vTaskDelay(pdMS_TO_TICKS(8));
 	}
@@ -946,107 +987,15 @@ void vDrawGameText(void)
     vDrawNumber(my_player.n_lives, 20, LOWER_TEXT_YLOCATION, 1);
 }
 
-void vDrawSpaceship(void)
-{
-    checkDraw(tumDrawLoadedImage(my_spaceship.image, my_spaceship.x,
-                                my_spaceship.y),
-                __FUNCTION__);
-}
-
-void vDrawMonsters(void)
-{
-    int i, j;
-
-    for (i = 0; i < N_ROWS; i++) {
-        for (j = 0; j < N_COLUMNS; j++) {
-            if (my_monsters.monster[i][j].alive)
-                checkDraw(tumDrawSprite(my_monsters.monster[i][j].spritesheet, my_monsters.monster[i][j].frametodraw, 0,
-                            my_monsters.monster[i][j].x, my_monsters.monster[i][j].y), __FUNCTION__);
-            
-        }
-    }
-}
-
-void vDrawBunkers(void)
-{
-    int k, i, j;
-
-    for (k = 0; k < N_BUNKERS; k++) {
-        for (i = 0; i < 2; i++) {
-            for (j = 0; j < 3; j++) {
-                if (my_bunkers.bunker[k].component[i][j].damage < 3) {
-                    checkDraw(tumDrawLoadedImage(my_bunkers.bunker[k].component[i][j].image,
-                                    my_bunkers.bunker[k].component[i][j].x,
-                                    my_bunkers.bunker[k].component[i][j].y)
-                                    , __FUNCTION__);
-                }
-            }
-        }
-    }
-}
-
-void vDrawBullets(void)
-{
-    int i = 0, n_bullets;
-    bullet_t my_bullet[MAX_OBJECTS];
-
-    while(uxQueueMessagesWaiting(BulletQueue)) {
-        xQueueReceive(BulletQueue, &my_bullet[i], portMAX_DELAY);
-        checkDraw(tumDrawFilledBox(my_bullet[i].x, my_bullet[i].y, my_bullet[i].width, my_bullet[i].height, my_bullet[i].colour), __FUNCTION__);
-        i++;
-    }
-
-    n_bullets = i;
-    for (i = 0; i < n_bullets; i++) {
-        xQueueSend(BulletQueue, &my_bullet[i], portMAX_DELAY);
-    }
-}
-
-void vDrawColision(colision_t my_colision)
-{
-    if (my_colision.image != NULL)
-        checkDraw(tumDrawLoadedImage(my_colision.image, my_colision.x, my_colision.y), __FUNCTION__);
-}
-
-#define N_TICKS 20
-
-/**
- * Receives colision object from queue, draws the image, increments count and returns colision to queue
- * if the colision has been drawn for more than N_TICKS does not return it to queue, deleting it 
- */
-void vDrawColisions(void)
-{
-    int i = 0, n_colisions;
-    colision_t my_colision[MAX_OBJECTS];
-
-    while(uxQueueMessagesWaiting(ColisionQueue)) {
-        xQueueReceive(ColisionQueue, &my_colision[i], portMAX_DELAY);
-        vDrawColision(my_colision[i]);
-        my_colision[i].frame_number++;
-        if (my_colision[i].frame_number > N_TICKS) {
-            i--;
-        }
-        i++;
-    }
-
-    n_colisions = i;
-    for (i = 0; i < n_colisions; i++) {
-        xQueueSend(ColisionQueue, &my_colision[i], portMAX_DELAY);
-    }
-}
-
-void vDrawMothership(void)
-{
-    if (my_mothership.alive)
-        checkDraw(tumDrawLoadedImage(my_mothership.image, my_mothership.x, my_mothership.y), __FUNCTION__);
-}
-
 void vDrawLives(void)
 {
     if (my_player.n_lives >= 2)
-        checkDraw(tumDrawLoadedImage(my_spaceship.image, 55, LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
+        checkDraw(tumDrawLoadedImage(my_spaceship.image, 55,
+                         LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
     if (my_player.n_lives >= 3)
-        checkDraw(tumDrawLoadedImage(my_spaceship.image, 55 + my_spaceship.width * 1.2, LOWER_TEXT_YLOCATION + 5), __FUNCTION__);
+        checkDraw(tumDrawLoadedImage(my_spaceship.image,
+                        55 + my_spaceship.width * 1.2, LOWER_TEXT_YLOCATION + 5),
+                     __FUNCTION__);
 }
 
 void vDrawGameObjects(void)
@@ -1104,12 +1053,14 @@ int vChooseShooterRow(int shooter_column)
 }
 
 /**
- * Chooses a random column of enemies
+ * @brief Chooses a random column of enemies
  * Of the choosen column scans through the monster bottom
  * to top and finds the first monster alive.
  * If no monster is alive returns repeats the process
  * until a column with a alive monster is found.
-**/
+ * 
+ * @param pvParameters 
+ */
 void vEnemyBulletShooter(void *pvParameters) {
     int shooter_column, shooter_row;
 
@@ -1123,7 +1074,8 @@ void vEnemyBulletShooter(void *pvParameters) {
         vShootBullet(my_monsters.monster[shooter_row][shooter_column].x 
                      + my_monsters.monster[shooter_row][shooter_column].width / 2,
                      my_monsters.monster[shooter_row][shooter_column].y 
-                     + my_monsters.monster[shooter_row][shooter_column].height, MONSTER_BULLET);
+                     + my_monsters.monster[shooter_row][shooter_column].height,
+                         MONSTER_BULLET);
 
         vShootMothershipBullet();
 
@@ -1148,7 +1100,7 @@ void vMonsterMover(void *pvParameters)
             }
             vMonsterCallback();//Plays the monsters moving sound
         }
-        vUpdateMonsterDirection(&direction);
+        vUpdateMonsterDirection(&direction);//only if any monster hits wall
     }
 }
 
@@ -1225,9 +1177,11 @@ void vSaveHighScore(void)
 }
 
 /**
- * Data can still be received even if player selects 1 player mode or is in menu
+ * @brief Data can still be received even if player selects 1 player mode or is in menu
  * If thats the case, then doesn't do anything with the received data
-**/
+ * 
+ * @return Return 1 if can receive data, 0 otherwise
+ */
 int vCheckCanReceiveData(void)
 {
     int current_state;
@@ -1434,7 +1388,7 @@ int main(int argc, char *argv[])
 
     printf("Welcome to Space Invaders Remastered HD!\n");
 
-	vTaskSuspender();
+	vSuspendAllTasks();
 
 	vTaskStartScheduler();
 

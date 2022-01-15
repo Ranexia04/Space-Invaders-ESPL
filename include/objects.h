@@ -218,6 +218,8 @@ extern mothership_t my_mothership;
 
 extern bunker_grid_t my_bunkers;
 
+extern void checkDraw(unsigned char status, const char *msg);
+
 /**
  * @brief Increments credit variable.
  * 
@@ -292,6 +294,12 @@ void vUpdateSavedValues(void);
 void vInitSavedValues(void);
 
 /**
+ * @brief Draws spaceship.
+ * 
+ */
+void vDrawSpaceship(void);
+
+/**
  * @brief Prevents the spaceship from moving out of the screen.
  * 
  */
@@ -329,6 +337,12 @@ void vResetSpaceship(void);
 void vInitSpaceship(image_handle_t spaceship_image);
 
 /**
+ * @brief Draws bullets.
+ * 
+ */
+void vDrawBullets(void);
+
+/**
  * @brief Receives every bullet in the queue, increments/decrements position 
  * and gives back to queue.
  * 
@@ -353,6 +367,22 @@ void vResetBulletQueue(void);
 void vShootBullet(int initial_x, int initial_y, int type);
 
 /**
+ * @brief Draws colision.
+ * 
+ * @param my_colision 
+ */
+void vDrawColision(colision_t my_colision);
+
+/**
+ * @brief Receives colision object from queue, draws the image,
+ *  increments count and returns colision to queue.
+ * If the colision has been drawn for more than N_TICKS 
+ *  does not return it to queue, deleting it 
+ * 
+ */
+void vDrawColisions(void);
+
+/**
  * @brief Receives every colision object in the queue, emptying it.
  * 
  */
@@ -366,6 +396,12 @@ void vResetColisionQueue(void);
  * @param image_buffer Image of colision to be drawn.
  */
 void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer);
+
+/**
+ * @brief Draws all alive monsters.
+ * 
+ */
+void vDrawMonsters(void);
 
 /**
  * @brief Plays monster moving sound
@@ -468,6 +504,12 @@ void vDecreaseMonsterDelay(void);
 void vInitMonsterDelay(void);
 
 /**
+ * @brief Draws mothership.
+ * 
+ */
+void vDrawMothership(void);
+
+/**
  * @brief Sets initial position of mothership
  * and sets alive variable to 1.
  * 
@@ -536,6 +578,12 @@ void vUpdateMothershipPosition(void);
  * @param mothership_image Image of mothership.
  */
 void vInitMothership(image_handle_t mothership_image);
+
+/**
+ * @brief Draws not too damaged bunker components.
+ * 
+ */
+void vDrawBunkers(void);
 
 /**
  * @brief Increments damage variable of bunker piece
