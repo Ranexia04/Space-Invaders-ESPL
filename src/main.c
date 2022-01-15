@@ -146,17 +146,21 @@ void vCheckCoinInput(void)
 
 void vResetGameBoard(void)
 {
+    int current_state;
+
     vResetBulletQueue();
     vResetColisionQueue();
     vResetMonsters();
     vResetMonsterDelay();
     vResetSpaceship();
     vResetBunkers();
-    if (my_player.n_players == 1) {
+
+    xQueuePeek(CurrentStateQueue, &current_state, portMAX_DELAY);
+    if (my_player.n_players == 1 && current_state == GAME) {
+        vResetMothership();
         vKillMothership();
         xTimerReset(xMothershipTimer, portMAX_DELAY);
-    }
-    else
+    } else if (my_player.n_players == 2)
         vSetUpMothershipPVP();
 }
 
@@ -413,10 +417,10 @@ int vCheckButtonInput(int key)
 			xSemaphoreGive(buttons.lock);
 			switch (key) {
 				case KEYCODE(A):
-                    vMoveSpaceshipLeft();
+                    vMoveSpaceship(RIGHT_TO_LEFT);
 					break;
 				case KEYCODE(D):
-                    vMoveSpaceshipRight();
+                    vMoveSpaceship(LEFT_TO_RIGHT);
 					break;
 				default:
 					 break;
@@ -766,11 +770,13 @@ void vCheckBulletColision(void)
         }
 
         if (vCheckBulletHitMothership(my_bullet[k])) {
-            if (my_player.n_players == 1)
-                vKillMothership();
             vUpdatePlayerScoreRandom();
             createColision(my_mothership.x + my_mothership.width / 2, 
                     my_mothership.y + my_mothership.height / 2, colision_image[1]);
+            if (my_player.n_players == 1) {
+                vResetMothership();
+                vKillMothership();
+            }
             goto colision_detected;
         }
 
@@ -871,12 +877,10 @@ void vCheckMothershipDifficultyChange(void)
 
 void vCheckSendSpaceshipMothershipDiff(void)
 {
-    static int prev_spaceship_location = 0;
     static TickType_t lastTimeSend = 0;
 
-    if (my_spaceship.x != prev_spaceship_location && xTaskGetTickCount() - lastTimeSend > pdMS_TO_TICKS(500)) {
+    if (xTaskGetTickCount() - lastTimeSend > pdMS_TO_TICKS(500)) {
         vSendSpaceshipMothershipDiff();
-        prev_spaceship_location = my_spaceship.x;
         lastTimeSend = xTaskGetTickCount();
     }
 }
@@ -1050,9 +1054,9 @@ void vDrawGameObjects(void)
     vDrawSpaceship();
     vDrawMonsters();
     vDrawBunkers();
+    vDrawMothership();
     vDrawBullets();
     vDrawColisions();
-    vDrawMothership();
 
     //draws line separating game and bottom of screen
     checkDraw(tumDrawFilledBox(0, GREEN_LINE_Y, SCREEN_WIDTH, 0, Green), __FUNCTION__);
@@ -1340,7 +1344,8 @@ int main(int argc, char *argv[])
 	}
 
 	//Timers
-    xMothershipTimer = xTimerCreate("Mothership Timer", pdMS_TO_TICKS(ORIGINAL_TIMER), pdTRUE, (void *) 0, vMothershipTimerCallback);
+    xMothershipTimer = xTimerCreate("Mothership Timer", pdMS_TO_TICKS(ORIGINAL_TIMER),
+                                     pdTRUE, (void *) 0, vMothershipTimerCallback);
     if (xMothershipTimer == NULL) {
         PRINT_ERROR("Could not open mothership timer");
         goto err_mothership_timer;

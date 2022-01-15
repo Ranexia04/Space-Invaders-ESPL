@@ -94,6 +94,4 @@ void vInitPVP(void)
 {
     UDP_receive_handle = aIOOpenUDPSocket(IPv4_addr, UDP_RECEIVE_PORT, 2000, 
             vReceiveCallback, NULL);
-    //UDP_transmit_handle = aIOOpenUDPSocket(IPv4_addr, UDP_TRANSMIT_PORT, 2000, 
-            //NULL, NULL);
 }

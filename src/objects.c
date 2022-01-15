@@ -120,24 +120,21 @@ void vInitSavedValues(void)
     saved.lock = xSemaphoreCreateMutex();
 }
 
-void vMoveSpaceshipLeft(void)
+void vFixSpaceshipOutofBounds(void)
 {
-    if (xSemaphoreTake(my_spaceship.lock, 0) == pdTRUE) {
-        my_spaceship.x = my_spaceship.x - CHANGE_IN_POSITION;
-        if (my_spaceship.x < 0) {
-            my_spaceship.x = 0;
-        }
-        xSemaphoreGive(my_spaceship.lock);
+    if (my_spaceship.x < 0) {
+        my_spaceship.x = 0;
+    }
+    if (my_spaceship.x + my_spaceship.width > SCREEN_WIDTH) {
+        my_spaceship.x = SCREEN_WIDTH - my_spaceship.width;
     }
 }
 
-void vMoveSpaceshipRight(void)
+void vMoveSpaceship(int direction)
 {
     if (xSemaphoreTake(my_spaceship.lock, 0) == pdTRUE) {
-        my_spaceship.x = my_spaceship.x + CHANGE_IN_POSITION;
-        if (my_spaceship.x + my_spaceship.width > SCREEN_WIDTH) {
-            my_spaceship.x = SCREEN_WIDTH - my_spaceship.width;
-        }
+        my_spaceship.x = my_spaceship.x + direction * CHANGE_IN_POSITION;
+        vFixSpaceshipOutofBounds();
         xSemaphoreGive(my_spaceship.lock);
     }
 }
@@ -441,26 +438,28 @@ void vSetUpMothershipPVP(void)
 
 void vResetMothership(void)
 {
-    TickType_t timer_starting = xTaskGetTickCount();
-
     xSemaphoreTake(my_mothership.lock, portMAX_DELAY);
-    my_mothership.direction = !my_mothership.direction;
+    my_mothership.direction = -1 * my_mothership.direction;
     if (my_mothership.direction == LEFT_TO_RIGHT)
-        my_mothership.x = -1 * my_mothership.width;
+        my_mothership.x = 0;
     if (my_mothership.direction == RIGHT_TO_LEFT)
-        my_mothership.x = SCREEN_WIDTH;
+        my_mothership.x = SCREEN_WIDTH - my_mothership.width - 1;
     if (my_mothership.direction == STOP)
         my_mothership.direction = LEFT_TO_RIGHT;
     my_mothership.alive = 1;
     xSemaphoreGive(my_mothership.lock);
-    xTimerChangePeriod(xMothershipTimer, ORIGINAL_TIMER, portMAX_DELAY);
 
-    xQueueOverwrite(TimerStartingQueue, &timer_starting);
+    TickType_t timer_starting = xTaskGetTickCount();
+
+    if(my_player.n_players == 1) {
+        xTimerChangePeriod(xMothershipTimer, ORIGINAL_TIMER, portMAX_DELAY);
+        xQueueOverwrite(TimerStartingQueue, &timer_starting);
+    }
 }
 
 void vMothershipTimerCallback(TimerHandle_t xMothershipTimer)
 {
-    vResetMothership();
+    vReviveMothership();
     tumSoundPlayUserSample("ufo_highpitch.wav");
 }
 
@@ -468,6 +467,13 @@ void vKillMothership(void)
 {
     xSemaphoreTake(my_mothership.lock, portMAX_DELAY);
     my_mothership.alive = 0;
+    xSemaphoreGive(my_mothership.lock);
+}
+
+void vReviveMothership(void)
+{
+    xSemaphoreTake(my_mothership.lock, portMAX_DELAY);
+    my_mothership.alive = 1;
     xSemaphoreGive(my_mothership.lock);
 }
 
@@ -487,15 +493,17 @@ int vIsMothershipInBoundsRight(void)
     return 0;
 }
 
+#define CHANGE_IN_POSITION_PVP 1
+
 void vUpdateMothershipPositionPVP(void)
 {
     if (my_mothership.alive) {
         xSemaphoreTake(my_mothership.lock, portMAX_DELAY);
         if (my_mothership.direction == LEFT_TO_RIGHT && vIsMothershipInBoundsRight())
-            my_mothership.x = my_mothership.x + 1;
+            my_mothership.x = my_mothership.x + CHANGE_IN_POSITION_PVP;
             
         if (my_mothership.direction == RIGHT_TO_LEFT && vIsMothershipInBoundsLeft())
-            my_mothership.x = my_mothership.x - 1;
+            my_mothership.x = my_mothership.x - CHANGE_IN_POSITION_PVP;
         xSemaphoreGive(my_mothership.lock);
     }
 }
@@ -504,15 +512,10 @@ void vUpdateMothershipPosition(void)
 {
     if (my_mothership.alive) {
         xSemaphoreTake(my_mothership.lock, portMAX_DELAY);
-        if (my_mothership.direction == LEFT_TO_RIGHT)
-            my_mothership.x = my_mothership.x + 1;
-        if (my_mothership.direction == RIGHT_TO_LEFT)
-            my_mothership.x = my_mothership.x - 1;
-        if (my_mothership.x > SCREEN_WIDTH) {
-            xSemaphoreGive(my_mothership.lock);
-            goto reset_mothership;
-        }
+        my_mothership.x = my_mothership.x + 1 * my_mothership.direction;
         xSemaphoreGive(my_mothership.lock);
+        if (!vIsMothershipInBoundsLeft() || !vIsMothershipInBoundsRight())
+            goto reset_mothership;
     }
 
     return;
@@ -533,7 +536,7 @@ void vInitMothership(image_handle_t mothership_image)
     my_mothership.width = tumDrawGetLoadedImageWidth(my_mothership.image);
     my_mothership.height = tumDrawGetLoadedImageHeight(my_mothership.image);
     my_mothership.alive = 0;
-    my_mothership.direction = RIGHT_TO_LEFT;
+    my_mothership.direction = LEFT_TO_RIGHT;
     my_mothership.lock = xSemaphoreCreateMutex();
 
     xQueueOverwrite(TimerStartingQueue, &timer_starting);
@@ -600,10 +603,16 @@ void vInitBunkers(image_handle_t *bunker_image)
 
 void vObjectSemaphoreDelete(void)
 {
-    vSemaphoreDelete(my_player.lock);
-    vSemaphoreDelete(saved.lock);
-    vSemaphoreDelete(my_spaceship.lock);
-    vSemaphoreDelete(my_monsters.lock);
-    vSemaphoreDelete(my_mothership.lock);
-    vSemaphoreDelete(my_bunkers.lock);
+    if (!my_player.lock)
+        vSemaphoreDelete(my_player.lock);
+    if (!saved.lock)
+        vSemaphoreDelete(saved.lock);
+    if (!my_spaceship.lock)
+        vSemaphoreDelete(my_spaceship.lock);
+    if (!my_monsters.lock)
+        vSemaphoreDelete(my_monsters.lock);
+    if (!my_mothership.lock)
+        vSemaphoreDelete(my_mothership.lock);
+    if (!my_bunkers.lock)
+        vSemaphoreDelete(my_bunkers.lock);
 }

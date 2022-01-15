@@ -34,6 +34,10 @@
 #define RIGHT_TO_LEFT -1
 #define STOP 0
 
+/**
+ * @brief Holds information regarding the player.
+ * 
+ */
 typedef struct player {
     int score1;
     int highscore;
@@ -45,6 +49,12 @@ typedef struct player {
     SemaphoreHandle_t lock;
 } player_t;
 
+/**
+ * @brief Object with some values to be saved
+ * so that when we can reset values to those
+ * different that the original values.
+ * 
+ */
 typedef struct saved_values {
     int n_lives;
     int score;
@@ -54,6 +64,10 @@ typedef struct saved_values {
     SemaphoreHandle_t lock;
 } saved_values_t;
 
+/**
+ * @brief Hold spaceship information.
+ * 
+ */
 typedef struct spaceship {
     image_handle_t image;
 
@@ -66,6 +80,10 @@ typedef struct spaceship {
     SemaphoreHandle_t lock;
 } spaceship_t;
 
+/**
+ * @brief Holds bullet information.
+ * 
+ */
 typedef struct bullet {
     int x;
     int y;
@@ -78,6 +96,10 @@ typedef struct bullet {
     int type;
 } bullet_t;
 
+/**
+ * @brief Holds colision information.
+ * 
+ */
 typedef struct colision {
     image_handle_t image;
 
@@ -90,6 +112,10 @@ typedef struct colision {
     int frame_number;
 } colision_t;
 
+/**
+ * @brief Holds monster information.
+ * 
+ */
 typedef struct monster {
     spritesheet_handle_t spritesheet;
 
@@ -104,6 +130,11 @@ typedef struct monster {
     int alive;
 } monster_t;
 
+/**
+ * @brief Composes a grid of monster objects
+ * to be handled safely with semaphore.
+ * 
+ */
 typedef struct monster_grid {
     monster_t monster[N_ROWS][N_COLUMNS];
 
@@ -113,6 +144,10 @@ typedef struct monster_grid {
     SemaphoreHandle_t lock;
 } monster_grid_t;
 
+/**
+ * @brief Holds mothership information.
+ * 
+ */
 typedef struct mothership {
     image_handle_t image;
 
@@ -128,6 +163,11 @@ typedef struct mothership {
     SemaphoreHandle_t lock;
 } mothership_t;
 
+/**
+ * @brief Holds information for each piece of
+ * each bunker.
+ * 
+ */
 typedef struct bunker_component {
     image_handle_t image;
 
@@ -140,10 +180,20 @@ typedef struct bunker_component {
     int damage;
 } bunker_component_t;
 
+/**
+ * @brief Each bunker is to be made out of
+ * pieces to be handled separatly.
+ * 
+ */
 typedef struct bunker {
     bunker_component_t component[2][3];
 } bunker_t;
 
+/**
+ * @brief Composes a grid of bunker objects
+ * to be handled safely with semaphore.
+ * 
+ */
 typedef struct bunker_grid {
     bunker_t bunker[N_BUNKERS];
     SemaphoreHandle_t lock;
@@ -168,39 +218,100 @@ extern mothership_t my_mothership;
 
 extern bunker_grid_t my_bunkers;
 
+/**
+ * @brief Increments credit variable.
+ * 
+ */
 void vInsertCoin(void);
 
+/**
+ * @brief Decrements credit variable.
+ * 
+ */
 void vUseCoin(void);
 
+/**
+ * @brief Updates player 2 score when mothership kills spaceship.
+ * 
+ */
 void vUpdateAIScore(void);
 
+/**
+ * @brief Decrement number of lives.
+ * 
+ */
 void vPlayerGetHit(void);
 
+/**
+ * @brief Updates player score using some randomness.
+ * 
+ */
 void vUpdatePlayerScoreRandom(void);
 
+/**
+ * @brief Updates player 1 score based on monster killed
+ * 
+ * @param i row of the monster killed
+ * @param j column of the monster killed.
+ */
 void vUpdatePlayerScore(int i, int j);
 
+/**
+ * @brief Modifies number of player variable
+ * 
+ * @param n_players Number of players to be set.
+ */
 void vSetPlayerNumber(int n_players);
 
+/**
+ * @brief Resets player object to either original values
+ * or values saved on "saved" object.
+ * 
+ */
 void vResetPlayer(void);
 
+/**
+ * @brief Initiates player object.
+ * 
+ */
 void vInitPlayer(void);
 
+/**
+ * @brief Update values to be saved
+ * based on the current ones. Credit variable
+ * is saved but decremented so that the coin
+ * is effectively used.
+ * 
+ */
 void vUpdateSavedValues(void);
 
+/**
+ * @brief Initiates saved object.
+ * 
+ */
 void vInitSavedValues(void);
 
-void vMoveSpaceshipLeft(void);
-
-void vMoveSpaceshipRight(void);
+/**
+ * @brief Prevents the spaceship from moving out of the screen.
+ * 
+ */
+void vFixSpaceshipOutofBounds(void);
 
 /**
- * @brief Receives all bullets from queue, and checks if any of them
- * are spaceship type
+ * @brief Moves spaceship right or left
  * 
- * @param bullet_state This string should be "PASSIVE" if no bullet is active
- * and "ATTACKING" otherwise
- * @return Returns the same information as the string mentioned above but in integer form.
+ * @param direction If direction is 1 then moves right, if -1 then moves left
+ */
+void vMoveSpaceship(int direction);
+
+/**
+ * @brief Receives all bullets from queue, and checks 
+ * if any of them are spaceship type
+ * 
+ * @param bullet_state This string should be "PASSIVE" 
+ * if no bullet is active and "ATTACKING" otherwise
+ * @return Returns the same information as the string 
+ * mentioned above but in integer form.
  */
 int vSpaceshipBulletActive(char *bullet_state);
 
@@ -210,6 +321,11 @@ int vSpaceshipBulletActive(char *bullet_state);
  */
 void vResetSpaceship(void);
 
+/**
+ * @brief Initiates spaceship object.
+ * 
+ * @param spaceship_image Image of spaceship.
+ */
 void vInitSpaceship(image_handle_t spaceship_image);
 
 /**
@@ -247,7 +363,7 @@ void vResetColisionQueue(void);
  * 
  * @param bullet_x x coordinate of the bullet that created the colision
  * @param bullet_y y coordinate of the bullet that created the colision
- * @param image_buffer image to be drawn
+ * @param image_buffer Image of colision to be drawn.
  */
 void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer);
 
@@ -258,6 +374,10 @@ void createColision(int bullet_x, int bullet_y, image_handle_t image_buffer);
  */
 void vPlayMonsterSound(void *args);
 
+/**
+ * @brief Callback of monster object.
+ * 
+ */
 void vMonsterCallback(void);
 
 /**
@@ -310,43 +430,140 @@ void vUpdateMonsterDirection(int *direction);
 int vMoveMonster(int row, int column, int direction);
 
 /**
- * @brief Revives and resets position of all the monsters.
+ * @brief Resets position of all the monsters
+ * and sets alive variable to 1.
  * 
  */
 void vResetMonsters(void);
 
+/**
+ * @brief Initiates monster grid
+ * 
+ * @param monster_image Image of each monster and is used to 
+ * compute monster width and height.
+ * @param monster_spritesheet Spritesheet of monster frames 
+ * to be drawn.
+ */
 void vInitMonsters(image_handle_t *monster_image, spritesheet_handle_t *monster_spritesheet);
 
+/**
+ * @brief Overwrites the queue with the original monster delay
+ * plus a certain offset that is saved on "saved" object.
+ * 
+ */
 void vResetMonsterDelay(void);
 
+/**
+ * @brief Decrements current monster delay 
+ * overwrites queue.
+ * 
+ */
 void vDecreaseMonsterDelay(void);
 
+/**
+ * @brief Overwrites a defined value to the
+ * monster delay queue.
+ * 
+ */
 void vInitMonsterDelay(void);
 
+/**
+ * @brief Sets initial position of mothership
+ * and sets alive variable to 1.
+ * 
+ */
 void vSetUpMothershipPVP(void);
 
+/**
+ * @brief Revives mothergunship, reverses direction and updates timer.
+ * 
+ */
 void vResetMothership(void);
 
+/**
+ * @brief This function gets called when the mothership timer expires.
+ * 
+ * @param xMothershipTimer 
+ */
 void vMothershipTimerCallback(TimerHandle_t xMothershipTimer);
 
+/**
+ * @brief Set .alive variable to 0 safely.
+ * 
+ */
 void vKillMothership(void);
 
+/**
+ * @brief Set .alive variable to 1 safely.
+ * 
+ */
+void vReviveMothership(void);
+
+/**
+ * @brief Checks if mothership is out of left of screen.
+ * 
+ * @return Return 1 if out of left of screen, and 0 otherwise.
+ */
 int vIsMothershipInBoundsLeft(void);
 
+/**
+ * @brief Checks if mothership is out of right of screen.
+ * 
+ * @return Return 1 if out of right of screen, and 0 otherwise.
+ */
 int vIsMothershipInBoundsRight(void);
 
+/**
+ * @brief Increments or decrements mothership position depeding
+ * on direction variable. Does not change position if out of bounds
+ * or if mothership is dead.
+ * 
+ */
 void vUpdateMothershipPositionPVP(void);
 
+/**
+ * @brief Increments or decrements mothership position depeding
+ * on direction variable. Does not change position if mothership
+ * is dead. If mothership goes out of bounds resets the mothership
+ * and the associated timer.
+ * 
+ */
 void vUpdateMothershipPosition(void);
 
+/**
+ * @brief Initiates mothership object.
+ * 
+ * @param mothership_image Image of mothership.
+ */
 void vInitMothership(image_handle_t mothership_image);
 
+/**
+ * @brief Increments damage variable of bunker piece
+ * 
+ * @param a Number of bunker that got hit
+ * @param i Row of bunker piece that got hit
+ * @param j Column of bunker piece that got hit.
+ */
 void vBunkerGetHit(int a, int i, int j);
 
+/**
+ * @brief Resets damage on all bunkers and bunker pieces.
+ * 
+ */
 void vResetBunkers(void);
 
+/**
+ * @brief Initiates bunker object.
+ * 
+ * @param bunker_image Array containing the images of each
+ * part of each bunker.
+ */
 void vInitBunkers(image_handle_t *bunker_image);
 
+/**
+ * @brief Deletes all semaphores created.
+ * 
+ */
 void vObjectSemaphoreDelete(void);
 
 #endif
