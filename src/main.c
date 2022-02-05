@@ -46,6 +46,9 @@
 
 #define STATE_DEBOUNCE_DELAY 300
 
+#define INCREMENT_MONSTER_DELAY 4
+#define DECREMENT_MONSTER_DELAY 2
+
 #define KEYCODE(CHAR) SDL_SCANCODE_##CHAR
 #define BACKGROUND_COLOUR Black
 
@@ -80,6 +83,7 @@ QueueHandle_t BulletQueue = NULL;
 QueueHandle_t ColisionQueue = NULL;
 QueueHandle_t MonsterDelayQueue = NULL;
 QueueHandle_t TimerStartingQueue = NULL;
+static QueueHandle_t LevelQueue = NULL;
 
 static image_handle_t spaceship_image = NULL;
 static image_handle_t monster_image[3] = {NULL};
@@ -170,6 +174,22 @@ void xGetButtonInput(void)
 		xQueueReceive(buttonInputQueue, &buttons.buttons, 0);
 		xSemaphoreGive(buttons.lock);
 	}
+}
+
+void vComputeLevel(void)
+{
+    int level, monster_delay;
+
+    xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
+    //if the subtraction is negative then the level should be positive, since is harder
+    level = -1 * (monster_delay - ORIGINAL_MONSTER_DELAY);
+    //increment is used when cheating, decrement when level is beat
+    //different values so to compute level correctly different division are to be used
+    if (level < 0)
+        level = level / INCREMENT_MONSTER_DELAY;
+    else
+        level = level / DECREMENT_MONSTER_DELAY;
+    xQueueOverwrite(LevelQueue, &level);
 }
 
 void vPauseOrUnpauseGame(void)
@@ -324,6 +344,7 @@ void vSwitchToGame(unsigned char prev_state,
          unsigned char current_state, TickType_t timer_elapsed)
 {
     if (prev_state == MENU || prev_state == current_state) {
+        vComputeLevel();
         if (my_player.n_players == 1) {
             vKillMothership();
             xTimerReset(xMothershipTimer, portMAX_DELAY);
@@ -477,6 +498,20 @@ void vDrawCredit(void)
     vDrawNumber(my_player.credits, SCREEN_WIDTH - 55, LOWER_TEXT_YLOCATION, 2);
 }
 
+void vDrawLevel(void)
+{
+    int level;
+
+    vDrawText("LEVEL:", SCREEN_WIDTH / 3 - 15, LOWER_TEXT_YLOCATION, NOT_CENTERING);
+    xQueuePeek(LevelQueue, &level, portMAX_DELAY);
+    if (level < 0) {
+        vDrawText("- ", SCREEN_WIDTH / 3 + 80, LOWER_TEXT_YLOCATION, NOT_CENTERING);
+        vDrawNumber(level, SCREEN_WIDTH / 3 + 90, LOWER_TEXT_YLOCATION, 1);
+    } else {
+        vDrawNumber(level, SCREEN_WIDTH / 3 + 80, LOWER_TEXT_YLOCATION, 1);
+    }
+}
+
 void vCheckGameInput(void)
 {
 	vCheckStateInput();
@@ -598,7 +633,7 @@ void vSetCheat3(void)
     int monster_delay;
 
     xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
-    monster_delay = monster_delay + 5;
+    monster_delay = monster_delay + INCREMENT_MONSTER_DELAY;
     //delay cannot be decreased too much or it would
     // become negative by the end of each game
     if (monster_delay > ORIGINAL_MONSTER_DELAY + 20) {
@@ -847,6 +882,16 @@ void vCheckBulletColision(void)
     }
 }
 
+void vIncreaseLevel(void)
+{
+    int monster_delay;
+
+    xQueuePeek(MonsterDelayQueue, &monster_delay, portMAX_DELAY);
+    monster_delay = monster_delay - DECREMENT_MONSTER_DELAY;
+    xQueueOverwrite(MonsterDelayQueue, &monster_delay);
+    vComputeLevel();
+}
+
 void vResetGame(void)
 {
     vTaskSuspend(GameDrawer);
@@ -870,6 +915,7 @@ void vCheckMonstersDead(void)
 
     if (!n_monster_alive) {
         vResetGame();
+        vIncreaseLevel();
     }
 }
 
@@ -984,6 +1030,7 @@ void vDrawGameText(void)
 {
     vDrawScores();
     vDrawCredit();
+    vDrawLevel();
     vDrawNumber(my_player.n_lives, 20, LOWER_TEXT_YLOCATION, 1);
 }
 
@@ -1297,6 +1344,13 @@ int main(int argc, char *argv[])
 		goto err_monster_delay_queue;
 	}
 
+    LevelQueue =
+		xQueueCreate(UNITARY_QUEUE_LENGHT, sizeof(int));
+	if (!LevelQueue) {
+		PRINT_ERROR("Could not open level queue");
+		goto err_level_queue;
+	}
+
 	//Timers
     xMothershipTimer = xTimerCreate("Mothership Timer", pdMS_TO_TICKS(ORIGINAL_TIMER),
                                      pdTRUE, (void *) 0, vMothershipTimerCallback);
@@ -1413,6 +1467,8 @@ err_bufferswap:
 err_statemachine:
     xTimerDelete(xMothershipTimer, portMAX_DELAY);
 err_mothership_timer:
+    vQueueDelete(LevelQueue);
+err_level_queue:
     vQueueDelete(MonsterDelayQueue);
 err_monster_delay_queue:
     vQueueDelete(TimerStartingQueue);
